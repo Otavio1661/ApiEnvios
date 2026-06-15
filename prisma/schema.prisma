@@ -1,0 +1,211 @@
+// ApiEnvios - Schema do Banco de Dados
+// PostgreSQL via Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// NÚMEROS WHATSAPP (instâncias dos providers)
+// ─────────────────────────────────────────────
+model WhatsappNumber {
+  id          String   @id @default(cuid())
+  phone       String   @unique              // ex: "5544999990000"
+  label       String?                       // ex: "Número Principal Gazin"
+  provider    Provider                      // EVOLUTION | WAHA | CLOUD_API
+  instanceId  String?                       // ID da instância no provider
+  status      NumberStatus @default(ACTIVE)
+  priority    Int          @default(0)      // menor = maior prioridade no fallback
+  
+  // Métricas anti-ban
+  sentToday      Int       @default(0)
+  sentTotal      Int       @default(0)
+  lastSentAt     DateTime?
+  lastResetAt    DateTime  @default(now())  // reset do contador diário
+  
+  // Ban tracking
+  bannedAt       DateTime?
+  banReason      String?
+  bannedCount    Int       @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages    Message[]
+  rotations   NumberRotation[]
+
+  @@index([status, priority])
+  @@index([provider])
+}
+
+// ─────────────────────────────────────────────
+// MENSAGENS ENVIADAS
+// ─────────────────────────────────────────────
+model Message {
+  id              String        @id @default(cuid())
+  externalId      String?       @unique  // ID gerado pelo sistema cliente
+  
+  // Destinatário
+  toPhone         String                 // ex: "5544988880000"
+  
+  // Conteúdo
+  type            MessageType   @default(TEXT)
+  content         String                 // texto ou URL da mídia
+  caption         String?                // legenda para mídias
+  
+  // Roteamento
+  providerId      String?                // ID no provider (ex: message id do Evolution)
+  numberId        String?
+  number          WhatsappNumber? @relation(fields: [numberId], references: [id])
+  provider        Provider?
+  providerAttempt Int           @default(1)  // qual tentativa (1=evolution, 2=waha, 3=cloud)
+  
+  // Status
+  status          MessageStatus @default(QUEUED)
+  errorMessage    String?
+  retryCount      Int           @default(0)
+  maxRetries      Int           @default(3)
+  
+  // Timestamps
+  scheduledAt     DateTime?              // para envio agendado
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  readAt          DateTime?
+  failedAt        DateTime?
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  attempts        MessageAttempt[]
+
+  @@index([status])
+  @@index([toPhone])
+  @@index([createdAt])
+  @@index([scheduledAt])
+}
+
+// ─────────────────────────────────────────────
+// TENTATIVAS DE ENVIO (histórico de fallback)
+// ─────────────────────────────────────────────
+model MessageAttempt {
+  id          String   @id @default(cuid())
+  messageId   String
+  message     Message  @relation(fields: [messageId], references: [id])
+  
+  provider    Provider
+  numberId    String?
+  attempt     Int               // 1, 2, 3...
+  success     Boolean
+  errorCode   String?
+  errorMsg    String?
+  duration    Int?              // ms
+  
+  createdAt   DateTime @default(now())
+
+  @@index([messageId])
+}
+
+// ─────────────────────────────────────────────
+// ROTAÇÃO DE NÚMEROS
+// ─────────────────────────────────────────────
+model NumberRotation {
+  id          String   @id @default(cuid())
+  numberId    String
+  number      WhatsappNumber @relation(fields: [numberId], references: [id])
+  
+  reason      RotationReason   // BAN | LIMIT_REACHED | MANUAL | SCHEDULED
+  triggeredBy String?          // "auto" | "webhook" | userId
+  
+  createdAt   DateTime @default(now())
+
+  @@index([numberId])
+}
+
+// ─────────────────────────────────────────────
+// CLIENTES DA API (sistemas que consomem a API)
+// ─────────────────────────────────────────────
+model ApiClient {
+  id          String   @id @default(cuid())
+  name        String
+  apiKey      String   @unique @default(cuid())
+  active      Boolean  @default(true)
+  
+  // Rate limiting por cliente
+  rateLimit   Int      @default(100)    // req/min
+  
+  // Métricas
+  totalSent   Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([apiKey])
+}
+
+// ─────────────────────────────────────────────
+// WEBHOOKS DE NOTIFICAÇÃO
+// ─────────────────────────────────────────────
+model Webhook {
+  id          String   @id @default(cuid())
+  url         String
+  events      String[] // ["BAN_DETECTED", "MESSAGE_FAILED", "NUMBER_ROTATED"]
+  active      Boolean  @default(true)
+  secret      String?  // para validação HMAC
+  
+  // Histórico de entregas
+  lastCalledAt  DateTime?
+  failCount     Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+enum Provider {
+  EVOLUTION   // Evolution API (principal)
+  WAHA        // WAHA - fallback gratuito
+  CLOUD_API   // WhatsApp Cloud API oficial - fallback pago
+}
+
+enum NumberStatus {
+  ACTIVE      // funcionando
+  WARMING     // em warm-up (número novo, enviando menos)
+  BANNED      // banido pelo WhatsApp
+  SUSPENDED   // suspenso manualmente
+  RETIRED     // aposentado / substituído
+}
+
+enum MessageStatus {
+  QUEUED      // na fila
+  SENDING     // sendo enviado
+  SENT        // enviado ao provider
+  DELIVERED   // entregue ao destinatário
+  READ        // lido
+  FAILED      // falhou em todos os providers
+  SCHEDULED   // agendado para envio futuro
+  CANCELLED   // cancelado
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  STICKER
+}
+
+enum RotationReason {
+  BAN
+  LIMIT_REACHED
+  MANUAL
+  SCHEDULED
+  ERROR_RATE
+}
