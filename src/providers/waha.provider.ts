@@ -1,6 +1,7 @@
 // src/providers/waha.provider.ts
 import axios, { AxiosInstance } from 'axios'
 import { config } from '../config'
+import { logger } from '../utils/logger'
 import type { IWhatsappProvider, ProviderSendResult, InstanceStatus, MessageType, Provider } from '../types'
 
 export class WahaProvider implements IWhatsappProvider {
@@ -9,12 +10,16 @@ export class WahaProvider implements IWhatsappProvider {
 
   constructor() {
     this.client = axios.create({
-      baseURL: config.providers.waha.url,
+      baseURL: config.providers.waha.url.replace(/\/$/, '') + '/api',
       headers: {
         'Content-Type': 'application/json',
         ...(config.providers.waha.apiKey ? { 'X-Api-Key': config.providers.waha.apiKey } : {}),
       },
       timeout: 15000,
+    })
+    this.client.interceptors.response.use(undefined, (err) => {
+      logger.debug(`[WAHA-ERR] ${err?.config?.method?.toUpperCase()} ${err?.config?.url} → ${err?.response?.status} | body: ${JSON.stringify(err?.response?.data)}`)
+      return Promise.reject(err)
     })
   }
 
@@ -24,7 +29,7 @@ export class WahaProvider implements IWhatsappProvider {
       // WAHA usa formato chatId: "5544999990000@c.us"
       const chatId = to.includes('@') ? to : `${to}@c.us`
 
-      const response = await this.client.post(`/api/sendText`, {
+      const response = await this.client.post(`/sendText`, {
         session: instanceId,
         chatId,
         text,
@@ -51,7 +56,7 @@ export class WahaProvider implements IWhatsappProvider {
     const chatId = to.includes('@') ? to : `${to}@c.us`
 
     try {
-      const response = await this.client.post(`/api/sendImage`, {
+      const response = await this.client.post(`/sendImage`, {
         session: instanceId,
         chatId,
         file: { url: mediaUrl },
@@ -70,7 +75,7 @@ export class WahaProvider implements IWhatsappProvider {
 
   async getInstanceStatus(instanceId: string): Promise<InstanceStatus> {
     try {
-      const response = await this.client.get(`/api/sessions/${instanceId}`)
+      const response = await this.client.get(`/sessions/${instanceId}`)
       const status = response.data?.status
 
       const stateMap: Record<string, InstanceStatus> = {
@@ -87,15 +92,28 @@ export class WahaProvider implements IWhatsappProvider {
     }
   }
 
+  // URL de webhook a aplicar na próxima criação/atualização de sessão.
+  // Definida via setWebhook antes do connect/createInstance.
+  private pendingWebhookUrl?: string
+
+  private webhookConfig(url?: string) {
+    if (!url) return undefined
+    return [{ url, events: ['message.ack', 'session.status', 'state.change'] }]
+  }
+
   async createInstance(instanceId: string): Promise<{ instanceId: string; qrCode?: string }> {
-    const response = await this.client.post('/api/sessions', {
+    const webhooks = this.webhookConfig(this.pendingWebhookUrl)
+    const response = await this.client.post('/sessions', {
       name: instanceId,
-      config: { noweb: { store: { enabled: true } } },
+      config: {
+        noweb: { store: { enabled: true } },
+        ...(webhooks ? { webhooks } : {}),
+      },
     })
 
     // Busca QR code logo após criar
     try {
-      const qrResp = await this.client.get(`/api/${instanceId}/auth/qr`)
+      const qrResp = await this.client.get(`/${instanceId}/auth/qr`)
       return {
         instanceId,
         qrCode: qrResp.data?.value,
@@ -105,8 +123,56 @@ export class WahaProvider implements IWhatsappProvider {
     }
   }
 
+  // GET /{id}/auth/qr → { value: "<base64>" }
+  async getQr(instanceId: string): Promise<{ qrCode?: string }> {
+    try {
+      const qrResp = await this.client.get(`/${instanceId}/auth/qr`)
+      return { qrCode: qrResp.data?.value }
+    } catch {
+      return {}
+    }
+  }
+
+  // Garante a sessão: tenta dar start; se não existir, cria. Depois devolve o QR.
+  async connect(instanceId: string): Promise<{ qrCode?: string }> {
+    try {
+      await this.client.post(`/sessions/${instanceId}/start`)
+    } catch (err: any) {
+      // Sessão inexistente (404) → cria
+      if (err?.response?.status === 404) {
+        await this.createInstance(instanceId)
+      }
+      // demais erros (ex.: já iniciada) são ignorados — seguimos para buscar o QR
+    }
+    return this.getQr(instanceId)
+  }
+
   async deleteInstance(instanceId: string): Promise<void> {
-    await this.client.delete(`/api/sessions/${instanceId}`)
+    await this.client.delete(`/sessions/${instanceId}`)
+  }
+
+  // Registra o webhook inbound no WAHA. Guarda a URL para aplicar na criação da sessão
+  // (createInstance) e tenta atualizar a sessão existente via PUT /sessions/{name}.
+  async setWebhook(instanceId: string, url: string): Promise<void> {
+    this.pendingWebhookUrl = url
+    const webhooks = this.webhookConfig(url)
+    try {
+      const resp = await this.client.put(`/sessions/${instanceId}`, {
+        config: {
+          noweb: { store: { enabled: true } },
+          webhooks,
+        },
+      })
+      logger.debug(`[WAHA] setWebhook ok (${instanceId}): ${JSON.stringify(resp.data?.status ?? resp.status)}`)
+    } catch (err: any) {
+      // Sessão ainda não existe (404) → será aplicado em createInstance via pendingWebhookUrl.
+      if (err?.response?.status === 404) {
+        logger.debug(`[WAHA] setWebhook adiado (sessão ${instanceId} inexistente) — aplicará na criação`)
+        return
+      }
+      const detail = err?.response?.data ?? err?.message
+      throw new Error(`WAHA setWebhook falhou: ${JSON.stringify(detail)}`)
+    }
   }
 
   private handleError(err: any, duration: number): ProviderSendResult {

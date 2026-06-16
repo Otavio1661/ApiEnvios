@@ -78,6 +78,20 @@ export class CloudApiProvider implements IWhatsappProvider {
     return { instanceId }
   }
 
+  // Cloud API não usa QR — no-ops
+  async connect(_instanceId: string): Promise<{ qrCode?: string }> {
+    return {}
+  }
+
+  async getQr(_instanceId: string): Promise<{ qrCode?: string }> {
+    return {}
+  }
+
+  // Cloud API: webhooks são configurados no painel da Meta, não por instância — no-op.
+  async setWebhook(_instanceId: string, _url: string): Promise<void> {
+    // no-op
+  }
+
   async deleteInstance(_instanceId: string): Promise<void> {
     // no-op
   }

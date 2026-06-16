@@ -2,7 +2,8 @@
 // PostgreSQL via Prisma ORM
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -11,36 +12,51 @@ datasource db {
 }
 
 // ─────────────────────────────────────────────
-// NÚMEROS WHATSAPP (instâncias dos providers)
+// INSTÂNCIAS WHATSAPP (entidade central — uma por número/sessão de provider)
 // ─────────────────────────────────────────────
-model WhatsappNumber {
+model Instance {
   id          String   @id @default(cuid())
-  phone       String   @unique              // ex: "5544999990000"
+  name        String?                       // nome amigável, ex: "Vendas"
+  phone       String?                       // ex: "5544999990000" — null até conectar via QR
   label       String?                       // ex: "Número Principal Gazin"
   provider    Provider                      // EVOLUTION | WAHA | CLOUD_API
   instanceId  String?                       // ID da instância no provider
   status      NumberStatus @default(ACTIVE)
   priority    Int          @default(0)      // menor = maior prioridade no fallback
-  
+
+  // Token de envio (estilo UltraMsg)
+  token       String   @unique @default(cuid())
+
+  // Estado de conexão (autenticação/QR — separado do ciclo de vida em `status`)
+  connectionState InstanceConnState @default(DISCONNECTED)
+  qrCode          String?
+  qrExpiresAt     DateTime?
+
+  // Vínculo com o tenant dono da instância
+  apiClientId String
+  apiClient   ApiClient @relation(fields: [apiClientId], references: [id])
+
   // Métricas anti-ban
   sentToday      Int       @default(0)
   sentTotal      Int       @default(0)
   lastSentAt     DateTime?
   lastResetAt    DateTime  @default(now())  // reset do contador diário
-  
+
   // Ban tracking
   bannedAt       DateTime?
   banReason      String?
   bannedCount    Int       @default(0)
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   messages    Message[]
   rotations   NumberRotation[]
 
+  @@unique([apiClientId, phone])
   @@index([status, priority])
   @@index([provider])
+  @@index([apiClientId, status])
 }
 
 // ─────────────────────────────────────────────
@@ -48,45 +64,51 @@ model WhatsappNumber {
 // ─────────────────────────────────────────────
 model Message {
   id              String        @id @default(cuid())
-  externalId      String?       @unique  // ID gerado pelo sistema cliente
-  
+  externalId      String?                // ID gerado pelo sistema cliente (idempotência por tenant)
+
+  // Tenant dono da mensagem
+  apiClientId     String
+  apiClient       ApiClient     @relation(fields: [apiClientId], references: [id])
+
   // Destinatário
   toPhone         String                 // ex: "5544988880000"
-  
+
   // Conteúdo
   type            MessageType   @default(TEXT)
   content         String                 // texto ou URL da mídia
   caption         String?                // legenda para mídias
-  
+
   // Roteamento
   providerId      String?                // ID no provider (ex: message id do Evolution)
-  numberId        String?
-  number          WhatsappNumber? @relation(fields: [numberId], references: [id])
+  instanceId      String?
+  instance        Instance?     @relation(fields: [instanceId], references: [id])
   provider        Provider?
   providerAttempt Int           @default(1)  // qual tentativa (1=evolution, 2=waha, 3=cloud)
-  
+
   // Status
   status          MessageStatus @default(QUEUED)
   errorMessage    String?
   retryCount      Int           @default(0)
   maxRetries      Int           @default(3)
-  
+
   // Timestamps
   scheduledAt     DateTime?              // para envio agendado
   sentAt          DateTime?
   deliveredAt     DateTime?
   readAt          DateTime?
   failedAt        DateTime?
-  
+
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   attempts        MessageAttempt[]
 
+  @@unique([apiClientId, externalId])
   @@index([status])
   @@index([toPhone])
   @@index([createdAt])
   @@index([scheduledAt])
+  @@index([apiClientId, createdAt])
 }
 
 // ─────────────────────────────────────────────
@@ -98,7 +120,7 @@ model MessageAttempt {
   message     Message  @relation(fields: [messageId], references: [id])
   
   provider    Provider
-  numberId    String?
+  instanceId  String?
   attempt     Int               // 1, 2, 3...
   success     Boolean
   errorCode   String?
@@ -115,15 +137,15 @@ model MessageAttempt {
 // ─────────────────────────────────────────────
 model NumberRotation {
   id          String   @id @default(cuid())
-  numberId    String
-  number      WhatsappNumber @relation(fields: [numberId], references: [id])
-  
+  instanceId  String
+  instance    Instance @relation(fields: [instanceId], references: [id])
+
   reason      RotationReason   // BAN | LIMIT_REACHED | MANUAL | SCHEDULED
   triggeredBy String?          // "auto" | "webhook" | userId
-  
+
   createdAt   DateTime @default(now())
 
-  @@index([numberId])
+  @@index([instanceId])
 }
 
 // ─────────────────────────────────────────────
@@ -134,15 +156,25 @@ model ApiClient {
   name        String
   apiKey      String   @unique @default(cuid())
   active      Boolean  @default(true)
-  
+
+  // Papel do tenant
+  role        ClientRole @default(CLIENT)   // ADMIN | CLIENT
+
+  // Fallback opt-in entre as instâncias do próprio tenant (+ Cloud API)
+  fallbackEnabled Boolean @default(false)
+
   // Rate limiting por cliente
   rateLimit   Int      @default(100)    // req/min
-  
+
   // Métricas
   totalSent   Int      @default(0)
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  instances   Instance[]
+  messages    Message[]
+  webhooks    Webhook[]
 
   @@index([apiKey])
 }
@@ -156,13 +188,19 @@ model Webhook {
   events      String[] // ["BAN_DETECTED", "MESSAGE_FAILED", "NUMBER_ROTATED"]
   active      Boolean  @default(true)
   secret      String?  // para validação HMAC
-  
+
+  // Tenant dono do webhook (null = webhook global do admin)
+  apiClientId String?
+  apiClient   ApiClient? @relation(fields: [apiClientId], references: [id])
+
   // Histórico de entregas
   lastCalledAt  DateTime?
   failCount     Int      @default(0)
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([apiClientId])
 }
 
 // ─────────────────────────────────────────────
@@ -180,6 +218,18 @@ enum NumberStatus {
   BANNED      // banido pelo WhatsApp
   SUSPENDED   // suspenso manualmente
   RETIRED     // aposentado / substituído
+}
+
+enum ClientRole {
+  ADMIN       // gerencia contas e instâncias de todos
+  CLIENT      // tenant comum
+}
+
+enum InstanceConnState {
+  DISCONNECTED  // sem sessão ativa
+  QR_PENDING    // aguardando leitura do QR
+  CONNECTED     // sessão autenticada
+  BANNED        // sessão banida pelo WhatsApp
 }
 
 enum MessageStatus {

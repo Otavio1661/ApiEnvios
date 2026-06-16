@@ -6,48 +6,69 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('🌱 Iniciando seed do banco...')
 
-  // Cliente API de desenvolvimento
+  // Cliente API admin (provisiona contas/instâncias)
+  const adminClient = await prisma.apiClient.upsert({
+    where: { apiKey: 'admin-key-123456' },
+    update: { role: 'ADMIN' },
+    create: {
+      name: 'Admin',
+      apiKey: 'admin-key-123456',
+      active: true,
+      role: 'ADMIN',
+      rateLimit: 1000,
+    },
+  })
+  console.log(`✅ ApiClient admin criado: ${adminClient.name} (key: ${adminClient.apiKey})`)
+
+  // Cliente API de desenvolvimento (tenant comum)
   const devClient = await prisma.apiClient.upsert({
     where: { apiKey: 'dev-key-123456' },
-    update: {},
+    update: { role: 'CLIENT' },
     create: {
       name: 'Cliente Dev',
       apiKey: 'dev-key-123456',
       active: true,
+      role: 'CLIENT',
       rateLimit: 1000,
     },
   })
   console.log(`✅ ApiClient criado: ${devClient.name} (key: ${devClient.apiKey})`)
 
-  // Número de exemplo (Evolution API)
-  const number1 = await prisma.whatsappNumber.upsert({
-    where: { phone: '5544999990001' },
+  // Instância de exemplo (Evolution API) — vinculada ao cliente dev
+  const instance1 = await prisma.instance.upsert({
+    where: { apiClientId_phone: { apiClientId: devClient.id, phone: '5544999990001' } },
     update: {},
     create: {
       phone: '5544999990001',
+      name: 'Vendas',
       label: 'Número Principal - Evolution',
       provider: 'EVOLUTION',
       instanceId: 'instancia-01',
+      token: 'dev-instance-token-01',
       status: 'ACTIVE',
       priority: 0,
+      apiClientId: devClient.id,
     },
   })
-  console.log(`✅ Número criado: ${number1.phone} (${number1.provider})`)
+  console.log(`✅ Instância criada: ${instance1.phone} (${instance1.provider}) token: ${instance1.token}`)
 
-  // Número de fallback (WAHA)
-  const number2 = await prisma.whatsappNumber.upsert({
-    where: { phone: '5544999990002' },
+  // Instância de fallback (WAHA) — vinculada ao cliente dev
+  const instance2 = await prisma.instance.upsert({
+    where: { apiClientId_phone: { apiClientId: devClient.id, phone: '5544999990002' } },
     update: {},
     create: {
       phone: '5544999990002',
+      name: 'Suporte',
       label: 'Número Fallback - WAHA',
       provider: 'WAHA',
       instanceId: 'waha-session-01',
+      token: 'dev-instance-token-02',
       status: 'ACTIVE',
       priority: 1,
+      apiClientId: devClient.id,
     },
   })
-  console.log(`✅ Número criado: ${number2.phone} (${number2.provider})`)
+  console.log(`✅ Instância criada: ${instance2.phone} (${instance2.provider}) token: ${instance2.token}`)
 
   console.log('\n🎉 Seed concluído!')
   console.log('\nPara testar a API:')

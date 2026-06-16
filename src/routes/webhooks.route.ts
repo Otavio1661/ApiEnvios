@@ -1,8 +1,11 @@
 // src/routes/webhooks.route.ts
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { authMiddleware } from '../middlewares/auth.middleware'
+import { authAccount } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
+import { mapInboundStatus, normalizeProvider, isStatusAdvance } from '../services/inbound-status.service'
+import { dispatchWebhook } from '../services/notification.service'
+import type { MessageStatus } from '../types'
 
 const webhookSchema = z.object({
   url: z.string().url(),
@@ -17,31 +20,168 @@ const webhookSchema = z.object({
 })
 
 export async function webhooksRoutes(app: FastifyInstance) {
+  // ── GET /webhooks — Lista webhooks do tenant ──────────────────
   app.get('/webhooks', {
-    preHandler: authMiddleware,
-    handler: async (_req, reply) => {
-      const webhooks = await prisma.webhook.findMany()
+    preHandler: authAccount,
+    handler: async (request, reply) => {
+      const webhooks = await prisma.webhook.findMany({
+        where: { apiClientId: request.apiClient!.id },
+      })
       return reply.send(webhooks)
     },
   })
 
+  // ── POST /webhooks — Cadastra webhook do tenant ───────────────
   app.post('/webhooks', {
-    preHandler: authMiddleware,
+    preHandler: authAccount,
     handler: async (request, reply) => {
       const body = webhookSchema.safeParse(request.body)
       if (!body.success) return reply.status(400).send({ error: body.error.flatten() })
-      const webhook = await prisma.webhook.create({ data: body.data })
+      const webhook = await prisma.webhook.create({
+        data: { ...body.data, apiClientId: request.apiClient!.id },
+      })
       return reply.status(201).send(webhook)
     },
   })
 
+  // ── DELETE /webhooks/:id — Remove webhook do tenant ───────────
   app.delete<{ Params: { id: string } }>('/webhooks/:id', {
-    preHandler: authMiddleware,
+    preHandler: authAccount,
     handler: async (request, reply) => {
-      await prisma.webhook.delete({ where: { id: request.params.id } })
+      const result = await prisma.webhook.deleteMany({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id },
+      })
+      if (result.count === 0) {
+        return reply.status(404).send({ error: 'Webhook não encontrado' })
+      }
       return reply.status(204).send()
     },
   })
+}
+
+// ══════════════════════════════════════════════════════════════
+// WEBHOOKS INBOUND — callbacks dos providers (SEM auth por API key)
+// ══════════════════════════════════════════════════════════════
+// O provider (Evolution/WAHA/Cloud API) chama estes endpoints. Não há API key:
+// o escopo de tenant é garantido casando a Message por providerId + instance.apiClientId.
+// Respondemos sempre 200 rápido (exceto provider inválido) e processamos de forma
+// resiliente (try/catch — nunca 500), pois providers re-tentam e podem floodar.
+
+// Mapeia o connectionState do payload para o estado do banco (já vem normalizado).
+export async function inboundWebhooksRoutes(app: FastifyInstance) {
+  app.post<{ Params: { provider: string; instanceId: string } }>(
+    '/webhooks/inbound/:provider/:instanceId',
+    async (request, reply) => {
+      const { provider: providerParam, instanceId } = request.params
+
+      // 1. Valida o provider (case-insensitive). Inválido → 404 controlado.
+      const provider = normalizeProvider(providerParam)
+      if (!provider) {
+        request.log.warn(`[Inbound] Provider desconhecido: ${providerParam}`)
+        return reply.status(404).send({ error: 'Provider desconhecido' })
+      }
+
+      // 2. Resolve a Instance pelo Instance.id (param da rota).
+      //    DECISÃO: respondemos 200 (e não 404) quando a instância não existe, para que o
+      //    provider NÃO re-tente em loop infinito por uma config de webhook órfã/obsoleta.
+      const instance = await prisma.instance.findUnique({ where: { id: instanceId } })
+      if (!instance) {
+        request.log.warn(`[Inbound] Instância inexistente: ${instanceId} (provider=${provider})`)
+        return reply.status(200).send({ ignored: true, reason: 'instance_not_found' })
+      }
+
+      // 3. Processamento resiliente — qualquer erro é logado e respondemos 200.
+      try {
+        const update = mapInboundStatus(provider, request.body)
+
+        if (!update) {
+          request.log.debug(`[Inbound] Payload não interpretável (provider=${provider})`)
+          return reply.status(200).send({ ignored: true, reason: 'unparseable' })
+        }
+
+        // 3a. Evento de conexão → atualiza connectionState da instância.
+        if (update.connectionState) {
+          await prisma.instance.update({
+            where: { id: instance.id },
+            data: { connectionState: update.connectionState },
+          })
+        }
+
+        // 3b. Evento de QR → atualiza qrCode da instância.
+        if (update.qrCode) {
+          await prisma.instance.update({
+            where: { id: instance.id },
+            data: { qrCode: update.qrCode, connectionState: 'QR_PENDING' },
+          })
+        }
+
+        // 3c. Evento de status de entrega → atualiza a Message (casando por providerId + tenant).
+        if (update.status && update.providerId) {
+          await applyMessageStatus(instance.apiClientId, update.providerId, update.status, request.log)
+        }
+
+        return reply.status(200).send({ ok: true })
+      } catch (err: any) {
+        request.log.error(`[Inbound] Erro ao processar callback (${provider}): ${err.message}`)
+        // NUNCA 500 — provider re-tentaria e poderia floodar.
+        return reply.status(200).send({ ok: false })
+      }
+    },
+  )
+}
+
+// Aplica o novo status à Message, garantindo que só AVANÇA no funil (SENT→DELIVERED→READ).
+async function applyMessageStatus(
+  apiClientId: string,
+  providerId: string,
+  status: MessageStatus,
+  log: FastifyInstance['log'],
+) {
+  // Escopo por tenant: casa providerId + apiClientId da instância.
+  const message = await prisma.message.findFirst({
+    where: { providerId, apiClientId },
+  })
+
+  if (!message) {
+    log.warn(`[Inbound] Message não encontrada para providerId=${providerId} (tenant=${apiClientId})`)
+    return
+  }
+
+  // Só avança no funil — nunca regride (ex.: READ não volta para DELIVERED).
+  if (!isStatusAdvance(message.status as MessageStatus, status)) {
+    log.debug(`[Inbound] Ignorado (não avança): ${message.status} → ${status} (msg=${message.id})`)
+    return
+  }
+
+  const now = new Date()
+  await prisma.message.update({
+    where: { id: message.id },
+    data: {
+      status,
+      ...(status === 'DELIVERED' ? { deliveredAt: now } : {}),
+      ...(status === 'READ' ? { readAt: message.readAt ?? now, deliveredAt: message.deliveredAt ?? now } : {}),
+    },
+  })
+
+  log.info(`[Inbound] Message ${message.id}: ${message.status} → ${status}`)
+
+  // Ao entregar, repassa MESSAGE_DELIVERED ao webhook do tenant (best-effort).
+  if (status === 'DELIVERED') {
+    try {
+      await dispatchWebhook(
+        'MESSAGE_DELIVERED',
+        {
+          messageId: message.id,
+          providerId,
+          toPhone: message.toPhone,
+          deliveredAt: now.toISOString(),
+        },
+        message.apiClientId,
+      )
+    } catch (err: any) {
+      log.error(`[Inbound] Falha ao repassar MESSAGE_DELIVERED: ${err.message}`)
+    }
+  }
 }
 
 // src/routes/health.route.ts (inline)

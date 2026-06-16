@@ -1,6 +1,16 @@
 // src/types/index.ts
 // Tipos globais do ApiEnvios
 
+import type { ApiClient, Instance } from '@prisma/client'
+
+// ── Augmentação do Fastify: contexto de autenticação ─────────
+declare module 'fastify' {
+  interface FastifyRequest {
+    apiClient?: ApiClient
+    instance?: Instance
+  }
+}
+
 export type Provider = 'EVOLUTION' | 'WAHA' | 'CLOUD_API'
 
 export type MessageStatus = 
@@ -13,7 +23,7 @@ export type MessageStatus =
   | 'SCHEDULED'
   | 'CANCELLED'
 
-export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT'
+export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER'
 
 export type NumberStatus = 'ACTIVE' | 'WARMING' | 'BANNED' | 'SUSPENDED' | 'RETIRED'
 
@@ -45,8 +55,24 @@ export interface IWhatsappProvider {
   sendMedia(instanceId: string, to: string, mediaUrl: string, caption?: string, type?: MessageType): Promise<ProviderSendResult>
   getInstanceStatus(instanceId: string): Promise<InstanceStatus>
   createInstance(instanceId: string): Promise<{ instanceId: string; qrCode?: string }>
+  /** Conecta/reconecta uma instância JÁ criada e retorna o QR atual. */
+  connect(instanceId: string): Promise<{ qrCode?: string }>
+  /** Busca o QR atual sem recriar a instância. */
+  getQr(instanceId: string): Promise<{ qrCode?: string }>
+  /** Registra a URL de webhook inbound no provider (no-op na Cloud API). */
+  setWebhook(instanceId: string, url: string): Promise<void>
   deleteInstance(instanceId: string): Promise<void>
 }
+
+// ── Resultado do parse de um callback inbound de provider ─────
+export interface InboundStatusUpdate {
+  providerId: string                  // ID da mensagem no provider
+  status?: MessageStatus              // novo status de entrega mapeado
+  connectionState?: InstanceConnState // novo estado de conexão (connection/session events)
+  qrCode?: string                     // QR atualizado (qrcode.updated)
+}
+
+export type InstanceConnState = 'DISCONNECTED' | 'QR_PENDING' | 'CONNECTED' | 'BANNED'
 
 export type InstanceStatus = 
   | 'connected' 

@@ -37,13 +37,13 @@ services:
 
   # ── Provider 1: Evolution API ───────────────────────────────
   evolution_api:
-    image: atendai/evolution-api:v2.3.7
+    image: atendai/evolution-api:latest
     container_name: apienvios_evolution
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
-      SERVER_URL: http://localhost:8080
+      SERVER_URL: http://localhost:8081
       AUTHENTICATION_API_KEY: evolution-key-dev-123
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
       DATABASE_ENABLED: "true"
@@ -68,10 +68,14 @@ services:
     container_name: apienvios_waha
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3078:3000"
     environment:
       WHATSAPP_DEFAULT_ENGINE: NOWEB
       WAHA_PRINT_QR: "false"
+      WAHA_API_KEY: "1c76189c459b4d90972c2fdea52de530"
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: admin123
+      WAHA_DASHBOARD_API_KEY: "1c76189c459b4d90972c2fdea52de530"
     volumes:
       - waha_data:/app/.sessions
 
@@ -83,15 +87,17 @@ services:
     container_name: apienvios_app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3002:3002"
     environment:
       NODE_ENV: development
+      PORT: 3002
       DATABASE_URL: postgresql://apienvios:senha123@postgres:5432/apienvios
       REDIS_HOST: redis
       REDIS_PORT: 6379
       EVOLUTION_API_URL: http://evolution_api:8080
       EVOLUTION_API_KEY: evolution-key-dev-123
       WAHA_URL: http://waha:3000
+      WAHA_API_KEY: "1c76189c459b4d90972c2fdea52de530"
     volumes:
       - .:/app
       - /app/node_modules

@@ -13,6 +13,10 @@ export const config = {
     port: Number(process.env.PORT ?? 3000),
     apiSecret: process.env.API_SECRET ?? 'dev-secret-change-me',
     isDev: (process.env.NODE_ENV ?? 'development') === 'development',
+    // URL base pública usada para montar apiUrl das instâncias e URLs de webhook
+    publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000',
+    // Teto de requisições/minuto para clientes sem rateLimit próprio definido
+    defaultRateLimit: Number(process.env.DEFAULT_RATE_LIMIT ?? 100),
   },
 
   db: {
