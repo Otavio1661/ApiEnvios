@@ -111,7 +111,7 @@ export class WahaProvider implements IWhatsappProvider {
 
   async createInstance(instanceId: string): Promise<{ instanceId: string; qrCode?: string }> {
     const webhooks = this.webhookConfig(this.pendingWebhookUrl)
-    const response = await this.client.post('/sessions', {
+    await this.client.post('/sessions', {
       name: instanceId,
       config: {
         noweb: { store: { enabled: true } },
@@ -119,29 +119,66 @@ export class WahaProvider implements IWhatsappProvider {
       },
     })
 
-    // Busca QR code logo após criar
-    try {
-      const qrResp = await this.client.get(`/${instanceId}/auth/qr`)
-      return {
-        instanceId,
-        qrCode: qrResp.data?.value,
-      }
-    } catch {
-      return { instanceId }
-    }
+    // Busca QR code logo após criar (best-effort: a sessão pode estar em STARTING
+    // e o QR só ficar disponível em SCAN_QR_CODE — nesse caso o polling /qr da view
+    // renova a cada 5s).
+    const { qrCode } = await this.getQr(instanceId)
+    return { instanceId, qrCode }
   }
 
-  // GET /{id}/auth/qr → { value: "<base64>" }
+  // Obtém o QR da sessão do WAHA como data URI PNG (`data:image/png;base64,...`).
+  //
+  // Contrato real do WAHA 2026.x (engine NOWEB), verificado contra o servidor:
+  //   GET /api/{session}/auth/qr                      → image/png BINÁRIO (PNG escaneável)
+  //   GET /api/{session}/auth/qr?format=image         → image/png BINÁRIO (idem)
+  //   GET /api/{session}/auth/qr (Accept: json)       → { mimetype, data: "<base64-png>" }
+  //   GET /api/{session}/auth/qr?format=raw           → { value: "<string-bruta-do-QR>" } (NÃO é imagem)
+  //
+  // Por isso pedimos a IMAGEM binária (responseType arraybuffer) e convertemos para
+  // base64 nós mesmos — determinístico e estável entre versões. Mantemos fallback
+  // para os shapes JSON (`data`/`value` base64) por robustez. Se a sessão ainda não
+  // está em SCAN_QR_CODE, o WAHA responde 422 e devolvemos vazio (a view faz polling).
   async getQr(instanceId: string): Promise<{ qrCode?: string }> {
     try {
-      const qrResp = await this.client.get(`/${instanceId}/auth/qr`)
-      return { qrCode: qrResp.data?.value }
-    } catch {
+      const qrResp = await this.client.get(`/${instanceId}/auth/qr`, {
+        params: { format: 'image' },
+        responseType: 'arraybuffer',
+        headers: { Accept: 'image/png' },
+      })
+
+      const contentType = String(qrResp.headers?.['content-type'] ?? '')
+      const buf = Buffer.from(qrResp.data)
+
+      // Caminho principal: corpo é uma imagem binária → base64 + data URI.
+      if (contentType.startsWith('image/')) {
+        const mime = contentType.split(';')[0].trim() || 'image/png'
+        return { qrCode: `data:${mime};base64,${buf.toString('base64')}` }
+      }
+
+      // Fallback: alguma versão respondeu JSON ({ data } base64 PNG, ou { value }).
+      try {
+        const json = JSON.parse(buf.toString('utf8'))
+        const base64 = typeof json?.data === 'string' ? json.data : undefined
+        if (base64) {
+          const mime = typeof json?.mimetype === 'string' ? json.mimetype : 'image/png'
+          return { qrCode: `data:${mime};base64,${base64}` }
+        }
+      } catch {
+        // não era JSON — cai no retorno vazio abaixo
+      }
+      return {}
+    } catch (err: any) {
+      // 422 = sessão ainda não está em SCAN_QR_CODE (ex.: STARTING). Não é erro fatal:
+      // a view renova via polling /qr a cada 5s.
+      logger.debug(`[WAHA] getQr indisponível (${instanceId}): ${err?.response?.status ?? err?.message}`)
       return {}
     }
   }
 
   // Garante a sessão: tenta dar start; se não existir, cria. Depois devolve o QR.
+  // Logo após o start a sessão fica em STARTING e o QR (SCAN_QR_CODE) pode não estar
+  // pronto de imediato — fazemos um retry curto e não-bloqueante. Se ainda assim não
+  // vier, a view renova via polling /qr a cada 5s.
   async connect(instanceId: string): Promise<{ qrCode?: string }> {
     try {
       await this.client.post(`/sessions/${instanceId}/start`)
@@ -152,7 +189,18 @@ export class WahaProvider implements IWhatsappProvider {
       }
       // demais erros (ex.: já iniciada) são ignorados — seguimos para buscar o QR
     }
-    return this.getQr(instanceId)
+    return this.getQrWithShortRetry(instanceId)
+  }
+
+  // Tenta obter o QR com algumas tentativas curtas (a sessão pode estar em STARTING).
+  // Limite total ~2s para não segurar o request — o polling da view cobre o resto.
+  private async getQrWithShortRetry(instanceId: string): Promise<{ qrCode?: string }> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await this.getQr(instanceId)
+      if (result.qrCode) return result
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 700))
+    }
+    return {}
   }
 
   async deleteInstance(instanceId: string): Promise<void> {
