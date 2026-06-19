@@ -30,6 +30,75 @@
   </form>
 </div>
 
+<div class="card">
+  <div class="page-head">
+    <h2>Números do pool</h2>
+    <span class="muted">Enviadas hoje (total do pool): <strong><%= it.sentTodayTotal %></strong></span>
+  </div>
+  <p class="muted">Cada número é uma sessão/conexão real do WhatsApp dentro deste pool. Conecte cada número escaneando o QR (Evolution/WAHA) ou direto (Cloud API).</p>
+
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th>Telefone / Label</th>
+        <th>Status</th>
+        <th>Conexão</th>
+        <th>Enviadas hoje</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (it.numbers.length === 0) { %>
+        <tr><td colspan="6" class="muted center">Nenhum número no pool ainda. Adicione abaixo.</td></tr>
+      <% } %>
+      <% it.numbers.forEach(function(num){ %>
+        <tr x-data="numberPanel('<%= it.instance.id %>', '<%= num.id %>', '<%= num.connectionState %>')"
+            x-init="startPolling()">
+          <td><strong><%= num.provider %></strong></td>
+          <td><%= num.phone || num.label || '—' %></td>
+          <td><span class="badge badge-status"><%= num.status %></span></td>
+          <td><span class="badge" :class="'badge-' + state" x-text="state"></span></td>
+          <td><%= num.sentToday %></td>
+          <td class="number-actions">
+            <button type="button" class="btn btn-ghost" @click="connect()" :disabled="loading">
+              <span x-show="!loading">Conectar</span>
+              <span x-show="loading" x-cloak>Conectando...</span>
+            </button>
+            <button type="button" class="btn btn-ghost" @click="refreshStatus()">Status</button>
+            <form method="POST" action="/admin/instances/<%= it.instance.id %>/numbers/<%= num.id %>/delete"
+                  onsubmit="return confirm('Remover este número do pool?')" style="display:inline">
+              <button type="submit" class="btn btn-ghost btn-danger">Remover</button>
+            </form>
+            <div class="qr-area" x-show="qr" x-cloak>
+              <p class="muted">Escaneie o QR no WhatsApp:</p>
+              <img :src="qr" alt="QR Code" class="qr-img" />
+            </div>
+            <div class="alert alert-error" x-show="error" x-cloak x-text="error" style="margin-top:8px"></div>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+  <h3>Adicionar número</h3>
+  <form method="POST" action="/admin/instances/<%= it.instance.id %>/numbers" class="form">
+    <label class="field">
+      <span>Provider</span>
+      <select name="provider">
+        <option value="EVOLUTION">Evolution</option>
+        <option value="WAHA">WAHA</option>
+        <option value="CLOUD_API">Cloud API</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Label (opcional)</span>
+      <input type="text" name="label" placeholder="Ex.: Número principal" />
+    </label>
+    <button type="submit" class="btn btn-primary">Adicionar</button>
+  </form>
+</div>
+
 <div class="grid-2"
      x-data="instancePanel('<%= it.instance.id %>', '<%= it.instance.connectionState %>')"
      x-init="startPolling()">
@@ -96,6 +165,71 @@
 </div>
 
 <script>
+  // C4: componente por NÚMERO do pool. Generaliza instancePanel recebendo o
+  // numberId, batendo nos endpoints /admin/instances/:id/numbers/:numberId/...
+  function numberPanel(instanceId, numberId, initialState) {
+    return {
+      instanceId,
+      numberId,
+      state: initialState,
+      qr: null,
+      loading: false,
+      error: '',
+      _statusTimer: null,
+      _qrTimer: null,
+      _base() {
+        return '/admin/instances/' + this.instanceId + '/numbers/' + this.numberId
+      },
+      _setQr(data) {
+        if (data.qrCode) {
+          this.qr = data.qrCode.startsWith('data:') ? data.qrCode : 'data:image/png;base64,' + data.qrCode
+        }
+      },
+      async connect() {
+        this.loading = true
+        this.error = ''
+        try {
+          const res = await fetch(this._base() + '/connect', { method: 'POST' })
+          const data = await res.json()
+          if (!res.ok) {
+            this.error = data.error || 'Falha ao conectar no provider'
+          } else {
+            this._setQr(data)
+            if (data.connectionState) this.state = data.connectionState
+          }
+        } catch (e) {
+          this.error = 'Erro de rede ao conectar'
+        } finally {
+          this.loading = false
+        }
+      },
+      async refreshStatus() {
+        try {
+          const res = await fetch(this._base() + '/status')
+          if (res.ok) {
+            const data = await res.json()
+            if (data.connectionState) this.state = data.connectionState
+            if (this.state === 'CONNECTED') this.qr = null
+          }
+        } catch (e) { /* silencioso */ }
+      },
+      async refreshQr() {
+        if (this.state !== 'QR_PENDING') return
+        try {
+          const res = await fetch(this._base() + '/qr')
+          if (res.ok) {
+            const data = await res.json()
+            this._setQr(data)
+          }
+        } catch (e) { /* silencioso */ }
+      },
+      startPolling() {
+        this._statusTimer = setInterval(() => this.refreshStatus(), 3000)
+        this._qrTimer = setInterval(() => this.refreshQr(), 5000)
+      },
+    }
+  }
+
   function instancePanel(id, initialState) {
     return {
       id,

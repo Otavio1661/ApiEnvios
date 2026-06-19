@@ -103,6 +103,10 @@ code { background: #f1f5f9; padding: 2px 6px; border-radius: 5px; font-size: 12p
 .badge-QR_PENDING { background: #fef3c7; color: var(--amber); }
 .badge-BANNED { background: #fee2e2; color: var(--red); }
 .badge-msg { background: #e0e7ff; color: var(--primary-dark); }
+.badge-status { background: #e0e7ff; color: var(--primary-dark); }
+
+.number-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.number-actions .qr-area { flex-basis: 100%; }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }

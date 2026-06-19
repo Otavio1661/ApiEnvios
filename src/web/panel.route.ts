@@ -20,6 +20,13 @@ import {
   refreshQr,
   toInstanceResponse,
   InstanceError,
+  listNumbers,
+  addNumber,
+  findNumberScoped,
+  connectNumber,
+  refreshQrNumber,
+  syncNumberStatus,
+  deleteNumber,
 } from '../services/instance.service'
 import { slugSchema } from '../utils/slug'
 import {
@@ -154,6 +161,12 @@ const renameInstanceSchema = z
 const testMessageSchema = z.object({
   to: z.string().min(10).max(20),
   body: z.string().min(1),
+})
+
+// Adicionar número ao pool pelo painel (form HTML): provider + label opcional.
+const addNumberFormSchema = z.object({
+  provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
+  label: z.string().min(1).optional(),
 })
 
 export async function panelRoutes(app: FastifyInstance) {
@@ -327,6 +340,11 @@ export async function panelRoutes(app: FastifyInstance) {
         take: 10,
       })
 
+      // C4: números do pool (InstanceNumber). O contador "enviadas hoje" agora vem
+      // da soma dos números (C3 moveu os contadores p/ o pool) — somamos aqui.
+      const numbers = await listNumbers(instance.id)
+      const sentTodayTotal = numbers.reduce((acc, n) => acc + n.sentToday, 0)
+
       return renderPage(
         app,
         reply,
@@ -335,6 +353,8 @@ export async function panelRoutes(app: FastifyInstance) {
           title: `${instance.name || 'Instância'} — ApiEnvios`,
           instance: toInstanceResponse(instance),
           messages,
+          numbers,
+          sentTodayTotal,
           sent: request.query.sent === '1',
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           sendError: request.query.err ? decodeURIComponent(request.query.err) : null,
@@ -377,6 +397,169 @@ export async function panelRoutes(app: FastifyInstance) {
         return reply.redirect(
           `/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao enfileirar a mensagem.')}`,
         )
+      }
+    },
+  )
+
+  // ══════════════════════════════════════════════════════════
+  // C4 — Gestão dos NÚMEROS do pool (InstanceNumber) pelo painel.
+  // Forms HTML (add/delete via POST + redirect ?ok=/?err=) e endpoints
+  // finos JSON p/ Alpine (connect/qr/status por número). Reusa o service C2.
+  // ══════════════════════════════════════════════════════════
+
+  // ── POST /instances/:id/numbers — Adiciona número ao pool ──
+  app.post<{ Params: { id: string } }>(
+    '/instances/:id/numbers',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.redirect('/admin')
+
+      const raw = (request.body ?? {}) as Record<string, unknown>
+      const parsed = addNumberFormSchema.safeParse({
+        provider: raw.provider,
+        label: emptyToUndefined(raw.label),
+      })
+      if (!parsed.success) {
+        const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
+        return reply.redirect(
+          `/admin/instances/${instance.id}?err=${encodeURIComponent(msg)}`,
+        )
+      }
+
+      try {
+        await addNumber({
+          instanceId: instance.id,
+          provider: parsed.data.provider,
+          label: parsed.data.label,
+          apiClientId: request.apiClient!.id,
+        })
+        return reply.redirect(
+          `/admin/instances/${instance.id}?ok=${encodeURIComponent('Número adicionado ao pool.')}`,
+        )
+      } catch (err: any) {
+        if (err instanceof InstanceError) {
+          return reply.redirect(
+            `/admin/instances/${instance.id}?err=${encodeURIComponent(err.message)}`,
+          )
+        }
+        request.log.error(`[Painel] Falha ao adicionar número: ${err.message}`)
+        return reply.redirect(
+          `/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao adicionar o número.')}`,
+        )
+      }
+    },
+  )
+
+  // ── POST /instances/:id/numbers/:numberId/delete — Remove número ──
+  // POST porque formulário HTML não emite DELETE nativamente.
+  app.post<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId/delete',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.redirect('/admin')
+
+      const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+      if (!number || number.instanceId !== instance.id) {
+        return reply.redirect(
+          `/admin/instances/${instance.id}?err=${encodeURIComponent('Número não encontrado.')}`,
+        )
+      }
+
+      await deleteNumber(number.id, request.apiClient!.id, request.log)
+      return reply.redirect(
+        `/admin/instances/${instance.id}?ok=${encodeURIComponent('Número removido do pool.')}`,
+      )
+    },
+  )
+
+  // ── POST /instances/:id/numbers/:numberId/connect (JSON p/ Alpine) ──
+  app.post<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId/connect',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+      if (!number || number.instanceId !== instance.id) {
+        return reply.status(404).send({ error: 'Número não encontrado' })
+      }
+
+      try {
+        const result = await connectNumber(number, request.log)
+        return reply.send(result)
+      } catch (err: any) {
+        request.log.error(`[Painel] number connect falhou (${number.provider}): ${err.message}`)
+        return reply.status(502).send({
+          error: 'Falha ao conectar no provider',
+          provider: number.provider,
+          detail: err?.response?.data?.message ?? err.message,
+        })
+      }
+    },
+  )
+
+  // ── GET /instances/:id/numbers/:numberId/qr (JSON p/ Alpine) ──
+  app.get<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId/qr',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+      if (!number || number.instanceId !== instance.id) {
+        return reply.status(404).send({ error: 'Número não encontrado' })
+      }
+      if (number.provider === 'CLOUD_API') {
+        return reply.status(400).send({ error: 'Cloud API não utiliza QR Code' })
+      }
+
+      const expired = !number.qrExpiresAt || number.qrExpiresAt.getTime() < Date.now()
+      if (number.qrCode && !expired) {
+        return reply.send({
+          qrCode: number.qrCode,
+          qrExpiresAt: number.qrExpiresAt,
+          connectionState: number.connectionState,
+        })
+      }
+
+      try {
+        const updated = await refreshQrNumber(number)
+        return reply.send({
+          qrCode: updated.qrCode,
+          qrExpiresAt: updated.qrExpiresAt,
+          connectionState: updated.connectionState,
+        })
+      } catch (err: any) {
+        request.log.error(`[Painel] number qr falhou (${number.provider}): ${err.message}`)
+        return reply.status(502).send({ error: 'Falha ao renovar QR no provider' })
+      }
+    },
+  )
+
+  // ── GET /instances/:id/numbers/:numberId/status (JSON p/ Alpine) ──
+  app.get<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId/status',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+      if (!number || number.instanceId !== instance.id) {
+        return reply.status(404).send({ error: 'Número não encontrado' })
+      }
+
+      try {
+        const connectionState = await syncNumberStatus(number)
+        return reply.send({ connectionState })
+      } catch (err: any) {
+        request.log.error(`[Painel] number status falhou (${number.provider}): ${err.message}`)
+        // Degrada graciosamente: devolve o estado conhecido (sem 502 ruidoso).
+        return reply.send({ connectionState: number.connectionState, stale: true })
       }
     },
   )
