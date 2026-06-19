@@ -6,7 +6,8 @@
   <form method="POST" action="/admin/instances" class="add-form" x-data="{ open: false }">
     <button type="button" class="btn btn-primary" @click="open = !open">+ Adicionar instância</button>
     <div class="add-fields" x-show="open" x-cloak>
-      <input type="text" name="name" placeholder="Nome (ex: Vendas)" />
+      <input type="text" name="name" placeholder="Nome (ex: Vendas-SP)" />
+      <input type="text" name="slug" placeholder="Slug (ex: vendas-sp)" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" />
       <select name="provider">
         <option value="WAHA">WAHA</option>
         <option value="EVOLUTION">Evolution</option>
@@ -30,6 +31,7 @@
   <table class="instances-table">
     <thead>
       <tr>
+        <th>Nome / Slug</th>
         <th>Status de autenticação</th>
         <th>API URL</th>
         <th>ID da instância</th>
@@ -39,10 +41,11 @@
     </thead>
     <tbody>
       <% if (it.instances.length === 0) { %>
-        <tr><td colspan="5" class="muted center">Nenhuma instância ainda. Crie a primeira acima.</td></tr>
+        <tr><td colspan="6" class="muted center">Nenhuma instância ainda. Crie a primeira acima.</td></tr>
       <% } %>
       <% it.instances.forEach(function(inst){ %>
         <tr>
+          <td><strong><%= inst.name || '—' %></strong><br/><code><%= inst.slug || '—' %></code></td>
           <td><span class="badge badge-<%= inst.connectionState %>"><%= inst.connectionState %></span></td>
           <td><code><%= inst.apiUrl %></code></td>
           <td><code><%= inst.id %></code></td>

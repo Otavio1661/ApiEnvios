@@ -2,14 +2,61 @@
 // Lógica compartilhada de instâncias (gestão/QR/status) reusada tanto pela API REST
 // (src/routes/instances.route.ts) quanto pelo painel web (src/web/panel.route.ts).
 // NÃO contém regra de negócio nova: apenas centraliza o que antes estava inline na rota.
-import type { Instance } from '@prisma/client'
+import { Prisma, type Instance } from '@prisma/client'
 import type { FastifyBaseLogger } from 'fastify'
 import { prisma } from '../utils/prisma'
 import { config } from '../config'
 import { providers } from '../providers'
+import { slugify } from '../utils/slug'
 
 // Tempo de validade do QR em segundos
 export const QR_TTL_SECONDS = 45
+
+// Erro de negócio das operações de instância (ex.: nome/slug duplicado).
+// O caller decide o mapeamento: API REST → status HTTP (409); painel → ?err=.
+export class InstanceError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'NAME_TAKEN' | 'SLUG_TAKEN' | 'NOT_FOUND',
+  ) {
+    super(message)
+    this.name = 'InstanceError'
+  }
+}
+
+// Identifica violação de unicidade do Prisma (P2002) e diz qual coluna bateu.
+// Usado para distinguir conflito de slug (global) de conflito de name (por tenant).
+function uniqueViolationTarget(err: unknown): 'slug' | 'name' | 'other' | null {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+    return null
+  }
+  const target = err.meta?.target
+  const fields = Array.isArray(target) ? target.join(',') : String(target ?? '')
+  if (fields.includes('slug')) return 'slug'
+  if (fields.includes('name')) return 'name'
+  return 'other'
+}
+
+// Gera um slug único GLOBAL a partir de uma base, adicionando sufixo numérico
+// em caso de colisão (vendas-sp, vendas-sp-2, vendas-sp-3...). Reusado no
+// backfill e na criação de instância. `ignoreId` permite ignorar a própria
+// instância ao renomear.
+export async function generateUniqueSlug(base: string, ignoreId?: string): Promise<string> {
+  const root = slugify(base) || 'instancia'
+  let candidate = root
+  let n = 1
+  // Loop limitado a colisões reais; na prática para em 1–2 iterações.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const existing = await prisma.instance.findUnique({
+      where: { slug: candidate },
+      select: { id: true },
+    })
+    if (!existing || existing.id === ignoreId) return candidate
+    n += 1
+    candidate = `${root}-${n}`
+  }
+}
 
 // Monta a representação UltraMsg da instância, incluindo apiUrl pública.
 export function toInstanceResponse(instance: Instance) {
@@ -104,20 +151,84 @@ export function findInstanceScoped(id: string, apiClientId: string) {
   return prisma.instance.findFirst({ where: { id, apiClientId } })
 }
 
-export function createInstance(input: {
+// Resolve a instância por id OU slug, sempre escopada ao tenant. Usada pelas
+// rotas REST/painel que aceitam tanto o cuid quanto o slug amigável na URL.
+export function findInstanceByIdOrSlug(idOrSlug: string, apiClientId: string) {
+  return prisma.instance.findFirst({
+    where: { apiClientId, OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+  })
+}
+
+// Cria a instância.
+// - slug EXPLÍCITO: respeitado tal qual (apenas normalizado p/ kebab-case). Se já
+//   existir, o banco rejeita (P2002) → InstanceError('SLUG_TAKEN') [409]. O usuário
+//   pediu aquele slug específico, então não o "renomeamos" silenciosamente.
+// - slug DERIVADO (do name/provider, quando não informado): gerado com sufixo numérico
+//   em colisão, para que a criação nunca falhe por slug.
+// Conflito de name por tenant → InstanceError('NAME_TAKEN').
+export async function createInstance(input: {
   name?: string
+  slug?: string
   provider: Instance['provider']
   priority?: number
   apiClientId: string
-}) {
-  return prisma.instance.create({
-    data: {
-      name: input.name,
-      provider: input.provider,
-      priority: input.priority ?? 0,
-      apiClientId: input.apiClientId,
-    },
+}): Promise<Instance> {
+  const slug = input.slug
+    ? slugify(input.slug)
+    : await generateUniqueSlug(input.name ?? input.provider.toLowerCase())
+
+  try {
+    return await prisma.instance.create({
+      data: {
+        name: input.name,
+        slug,
+        provider: input.provider,
+        priority: input.priority ?? 0,
+        apiClientId: input.apiClientId,
+      },
+    })
+  } catch (err) {
+    throw mapUniqueViolation(err)
+  }
+}
+
+// Atualiza name e/ou slug de uma instância (renomear), escopado por tenant.
+// Valida unicidade (global p/ slug; por tenant p/ name) e mapeia P2002 → InstanceError.
+// Lança InstanceError('NOT_FOUND') se a instância não for do tenant.
+export async function updateInstance(input: {
+  id: string
+  apiClientId: string
+  name?: string
+  slug?: string
+}): Promise<Instance> {
+  const existing = await prisma.instance.findFirst({
+    where: { id: input.id, apiClientId: input.apiClientId },
   })
+  if (!existing) {
+    throw new InstanceError('Instância não encontrada', 'NOT_FOUND')
+  }
+
+  const data: Prisma.InstanceUpdateInput = {}
+  if (input.name !== undefined) data.name = input.name || null
+  if (input.slug !== undefined) {
+    // Slug informado no rename é respeitado tal qual (só normalizado). Colisão com
+    // OUTRA instância → P2002 → InstanceError('SLUG_TAKEN') [409] no catch abaixo.
+    data.slug = slugify(input.slug)
+  }
+
+  try {
+    return await prisma.instance.update({ where: { id: existing.id }, data })
+  } catch (err) {
+    throw mapUniqueViolation(err)
+  }
+}
+
+// Converte P2002 do Prisma em InstanceError tratável (slug/name); relança o resto.
+function mapUniqueViolation(err: unknown): unknown {
+  const target = uniqueViolationTarget(err)
+  if (target === 'slug') return new InstanceError('Slug já está em uso', 'SLUG_TAKEN')
+  if (target === 'name') return new InstanceError('Nome já está em uso nesta conta', 'NAME_TAKEN')
+  return err
 }
 
 // Resultado de uma conexão: ou QR (provider com fluxo de QR) ou já conectado (Cloud API).

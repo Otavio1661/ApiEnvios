@@ -12,13 +12,16 @@ import { normalizePhone } from '../utils/helpers'
 import { enqueueSend } from '../queues/send-message.queue'
 import {
   listInstances,
-  findInstanceScoped,
+  findInstanceByIdOrSlug,
   createInstance,
+  updateInstance,
   connectInstance,
   syncInstanceStatus,
   refreshQr,
   toInstanceResponse,
+  InstanceError,
 } from '../services/instance.service'
+import { slugSchema } from '../utils/slug'
 import {
   ProvisioningError,
   createClientWithOwner,
@@ -134,8 +137,19 @@ function emptyToUndefined(value: unknown): unknown {
 
 const createInstanceSchema = z.object({
   name: z.string().optional(),
+  slug: slugSchema.optional(),
   provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
 })
+
+// Renomear pelo painel: name e/ou slug (strings vazias viram undefined).
+const renameInstanceSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    slug: slugSchema.optional(),
+  })
+  .refine((d) => d.name !== undefined || d.slug !== undefined, {
+    message: 'Informe ao menos um nome ou slug.',
+  })
 
 const testMessageSchema = z.object({
   to: z.string().min(10).max(20),
@@ -227,23 +241,84 @@ export async function panelRoutes(app: FastifyInstance) {
 
   // ── POST /instances — Cria instância (reusa o service) ─────
   app.post('/instances', { preHandler: requirePanelAuth }, async (request, reply) => {
-    const parsed = createInstanceSchema.safeParse(request.body)
-    if (!parsed.success) return reply.redirect('/admin')
-
-    const instance = await createInstance({
-      name: parsed.data.name || undefined,
-      provider: parsed.data.provider,
-      apiClientId: request.apiClient!.id,
+    const raw = (request.body ?? {}) as Record<string, unknown>
+    const parsed = createInstanceSchema.safeParse({
+      name: emptyToUndefined(raw.name),
+      slug: emptyToUndefined(raw.slug),
+      provider: raw.provider,
     })
-    return reply.redirect(`/admin/instances/${instance.id}`)
+    if (!parsed.success) {
+      const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
+      return reply.redirect(`/admin?err=${encodeURIComponent(msg)}`)
+    }
+
+    try {
+      const instance = await createInstance({
+        name: parsed.data.name,
+        slug: parsed.data.slug,
+        provider: parsed.data.provider,
+        apiClientId: request.apiClient!.id,
+      })
+      return reply.redirect(`/admin/instances/${instance.id}`)
+    } catch (err: any) {
+      if (err instanceof InstanceError) {
+        return reply.redirect(`/admin?err=${encodeURIComponent(err.message)}`)
+      }
+      request.log.error(`[Painel] Falha ao criar instância: ${err.message}`)
+      return reply.redirect(`/admin?err=${encodeURIComponent('Falha ao criar a instância.')}`)
+    }
   })
 
-  // ── GET /instances/:id — Detalhe ───────────────────────────
-  app.get<{ Params: { id: string }; Querystring: { sent?: string; err?: string } }>(
+  // ── POST /instances/:id/rename — Renomeia name/slug (reusa o service) ─
+  app.post<{ Params: { id: string } }>(
+    '/instances/:id/rename',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.redirect('/admin')
+
+      const raw = (request.body ?? {}) as Record<string, unknown>
+      const parsed = renameInstanceSchema.safeParse({
+        name: emptyToUndefined(raw.name),
+        slug: emptyToUndefined(raw.slug),
+      })
+      if (!parsed.success) {
+        const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
+        return reply.redirect(
+          `/admin/instances/${instance.id}?err=${encodeURIComponent(msg)}`,
+        )
+      }
+
+      try {
+        const updated = await updateInstance({
+          id: instance.id,
+          apiClientId: request.apiClient!.id,
+          name: parsed.data.name,
+          slug: parsed.data.slug,
+        })
+        return reply.redirect(
+          `/admin/instances/${updated.id}?ok=${encodeURIComponent('Instância renomeada com sucesso.')}`,
+        )
+      } catch (err: any) {
+        if (err instanceof InstanceError) {
+          return reply.redirect(
+            `/admin/instances/${instance.id}?err=${encodeURIComponent(err.message)}`,
+          )
+        }
+        request.log.error(`[Painel] Falha ao renomear instância: ${err.message}`)
+        return reply.redirect(
+          `/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao renomear a instância.')}`,
+        )
+      }
+    },
+  )
+
+  // ── GET /instances/:id — Detalhe (aceita id OU slug) ───────
+  app.get<{ Params: { id: string }; Querystring: { sent?: string; ok?: string; err?: string } }>(
     '/instances/:id',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceScoped(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.redirect('/admin')
 
       const messages = await prisma.message.findMany({
@@ -261,6 +336,7 @@ export async function panelRoutes(app: FastifyInstance) {
           instance: toInstanceResponse(instance),
           messages,
           sent: request.query.sent === '1',
+          ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           sendError: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
         { user: request.authUser, isAdmin: request.apiClient!.role === 'ADMIN' },
@@ -273,7 +349,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/test',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceScoped(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.redirect('/admin')
 
       const parsed = testMessageSchema.safeParse(request.body)
@@ -440,7 +516,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/connect',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceScoped(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       try {
@@ -462,7 +538,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/qr',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceScoped(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
       if (instance.provider === 'CLOUD_API') {
         return reply.status(400).send({ error: 'Cloud API não utiliza QR Code' })
@@ -496,7 +572,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/status',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceScoped(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       try {

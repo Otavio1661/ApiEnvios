@@ -14,14 +14,30 @@ import {
   refreshQr,
   registerInboundWebhook,
   syncInstanceStatus,
+  createInstance,
+  findInstanceByIdOrSlug,
+  updateInstance,
+  InstanceError,
 } from '../services/instance.service'
+import { slugSchema } from '../utils/slug'
 
 // ── Schemas Zod ───────────────────────────────────────────────
 const createInstanceSchema = z.object({
   name: z.string().optional(),
+  slug: slugSchema.optional(),
   provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
   priority: z.number().int().min(0).default(0),
 })
+
+// Renomear: name e/ou slug; ao menos um deve ser informado.
+const updateInstanceSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    slug: slugSchema.optional(),
+  })
+  .refine((d) => d.name !== undefined || d.slug !== undefined, {
+    message: 'Informe ao menos name ou slug.',
+  })
 
 const patchStatusSchema = z.object({
   status: z.enum(['ACTIVE', 'WARMING', 'BANNED', 'SUSPENDED', 'RETIRED']),
@@ -53,16 +69,54 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
       }
 
-      const instance = await prisma.instance.create({
-        data: {
+      try {
+        const instance = await createInstance({
           name: body.data.name,
+          slug: body.data.slug,
           provider: body.data.provider,
           priority: body.data.priority,
           apiClientId: request.apiClient!.id,
-        },
-      })
+        })
+        return reply.status(201).send(toInstanceResponse(instance))
+      } catch (err: any) {
+        if (err instanceof InstanceError) {
+          return reply.status(409).send({ error: err.message, code: err.code })
+        }
+        request.log.error(`[Instances] Falha ao criar instância: ${err.message}`)
+        return reply.status(500).send({ error: 'Falha ao criar a instância' })
+      }
+    },
+  })
 
-      return reply.status(201).send(toInstanceResponse(instance))
+  // ── PATCH /instances/:id — Renomeia (name/slug) ───────────────
+  // Aceita id OU slug em :id. Valida unicidade (slug global, name por tenant).
+  app.patch<{ Params: { id: string } }>('/instances/:id', {
+    preHandler: authManage,
+    handler: async (request, reply) => {
+      const body = updateInstanceSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+
+      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!existing) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      try {
+        const instance = await updateInstance({
+          id: existing.id,
+          apiClientId: request.apiClient!.id,
+          name: body.data.name,
+          slug: body.data.slug,
+        })
+        return reply.send(toInstanceResponse(instance))
+      } catch (err: any) {
+        if (err instanceof InstanceError) {
+          const status = err.code === 'NOT_FOUND' ? 404 : 409
+          return reply.status(status).send({ error: err.message, code: err.code })
+        }
+        request.log.error(`[Instances] Falha ao renomear instância: ${err.message}`)
+        return reply.status(500).send({ error: 'Falha ao atualizar a instância' })
+      }
     },
   })
 
@@ -103,9 +157,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/instances/:id', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await prisma.instance.findFirst({
-        where: { id: request.params.id, apiClientId: request.apiClient!.id },
-      })
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
       return reply.send(toInstanceResponse(instance))
     },
@@ -115,9 +167,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/instances/:id', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await prisma.instance.findFirst({
-        where: { id: request.params.id, apiClientId: request.apiClient!.id },
-      })
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       // Remove a instância no provider (best-effort — não bloqueia a exclusão local)
@@ -138,9 +188,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/instances/:id/connect', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await prisma.instance.findFirst({
-        where: { id: request.params.id, apiClientId: request.apiClient!.id },
-      })
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       // Cloud API não tem fluxo de QR — já é considerada conectada
@@ -185,9 +233,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/instances/:id/qr', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await prisma.instance.findFirst({
-        where: { id: request.params.id, apiClientId: request.apiClient!.id },
-      })
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       if (instance.provider === 'CLOUD_API') {
@@ -229,9 +275,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/instances/:id/status', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await prisma.instance.findFirst({
-        where: { id: request.params.id, apiClientId: request.apiClient!.id },
-      })
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       try {
@@ -257,17 +301,16 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Status inválido' })
       }
 
-      const result = await prisma.instance.updateMany({
-        where: { id: request.params.id, apiClientId: request.apiClient!.id },
-        data: { status: body.data.status },
-      })
-
-      if (result.count === 0) {
+      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!existing) {
         return reply.status(404).send({ error: 'Instância não encontrada' })
       }
 
-      const instance = await prisma.instance.findUnique({ where: { id: request.params.id } })
-      return reply.send(instance ? toInstanceResponse(instance) : null)
+      const instance = await prisma.instance.update({
+        where: { id: existing.id },
+        data: { status: body.data.status },
+      })
+      return reply.send(toInstanceResponse(instance))
     },
   })
 
@@ -275,9 +318,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/instances/:id/rotate', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const existing = await prisma.instance.findFirst({
-        where: { id: request.params.id, apiClientId: request.apiClient!.id },
-      })
+      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!existing) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       const instance = await prisma.instance.update({

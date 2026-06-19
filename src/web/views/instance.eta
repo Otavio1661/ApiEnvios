@@ -2,8 +2,32 @@
   <div>
     <a href="/admin" class="muted">&larr; Voltar</a>
     <h1><%= it.instance.name || 'Instância' %></h1>
-    <p class="muted">Provider: <strong><%= it.instance.provider %></strong> · ID: <code><%= it.instance.id %></code></p>
+    <p class="muted">
+      Provider: <strong><%= it.instance.provider %></strong>
+      · Slug: <code><%= it.instance.slug || '—' %></code>
+      · ID: <code><%= it.instance.id %></code>
+    </p>
   </div>
+</div>
+
+<% if (it.ok) { %>
+  <div class="alert alert-ok"><%= it.ok %></div>
+<% } %>
+
+<div class="card">
+  <h2>Renomear instância</h2>
+  <p class="muted">O nome é um apelido único na sua conta. O slug é único globalmente e usado na URL/API (ex.: <code>/v1/instance/<%= it.instance.slug || 'meu-slug' %>/messages/chat</code>).</p>
+  <form method="POST" action="/admin/instances/<%= it.instance.id %>/rename" class="form">
+    <label class="field">
+      <span>Nome (apelido)</span>
+      <input type="text" name="name" value="<%= it.instance.name || '' %>" placeholder="Vendas-SP" />
+    </label>
+    <label class="field">
+      <span>Slug (kebab-case, 3–40)</span>
+      <input type="text" name="slug" value="<%= it.instance.slug || '' %>" placeholder="vendas-sp" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" />
+    </label>
+    <button type="submit" class="btn btn-primary">Salvar</button>
+  </form>
 </div>
 
 <div class="grid-2"
