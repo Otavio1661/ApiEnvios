@@ -100,6 +100,10 @@ model InstanceNumber {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Fase C3: o número passa a ser o alvo real do envio/rotação (aditivo).
+  messages  Message[]
+  rotations NumberRotation[]
+
   @@unique([instanceId, phone])
   @@index([instanceId])
   @@index([status, priority])
@@ -128,6 +132,9 @@ model Message {
   providerId      String?                // ID no provider (ex: message id do Evolution)
   instanceId      String?
   instance        Instance?     @relation(fields: [instanceId], references: [id])
+  // Fase C3: número do pool (InstanceNumber) que efetivou o envio. Aditivo/nullable.
+  numberId        String?
+  number          InstanceNumber? @relation(fields: [numberId], references: [id], onDelete: SetNull)
   provider        Provider?
   providerAttempt Int           @default(1)  // qual tentativa (1=evolution, 2=waha, 3=cloud)
 
@@ -155,6 +162,7 @@ model Message {
   @@index([createdAt])
   @@index([scheduledAt])
   @@index([apiClientId, createdAt])
+  @@index([numberId])
 }
 
 // ─────────────────────────────────────────────
@@ -186,12 +194,18 @@ model NumberRotation {
   instanceId  String
   instance    Instance @relation(fields: [instanceId], references: [id])
 
+  // Fase C3: rotação por NÚMERO do pool (aditivo/nullable). Mantém instanceId
+  // (compat) e referencia o InstanceNumber banido quando aplicável.
+  numberId    String?
+  number      InstanceNumber? @relation(fields: [numberId], references: [id], onDelete: SetNull)
+
   reason      RotationReason   // BAN | LIMIT_REACHED | MANUAL | SCHEDULED
   triggeredBy String?          // "auto" | "webhook" | userId
 
   createdAt   DateTime @default(now())
 
   @@index([instanceId])
+  @@index([numberId])
 }
 
 // ─────────────────────────────────────────────

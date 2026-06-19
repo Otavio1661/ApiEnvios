@@ -76,6 +76,8 @@ async function processJob(job: Job<SendJobData>) {
         sentAt: new Date(),
         provider: result.provider,
         providerId: result.providerId,
+        // Fase C3: registra qual número do pool efetivou o envio (quando houver).
+        numberId: result.numberId ?? undefined,
         errorMessage: null,
       },
     })
