@@ -309,6 +309,153 @@ export function findNumberScoped(
   })
 }
 
+// ── Fase C2: conexão/QR/status POR NÚMERO + gestão do pool ───────
+// Operações ADITIVAS que ESPELHAM as de Instance (connectInstance/refreshQr/
+// syncInstanceStatus/registerInboundWebhook), mas escrevem no InstanceNumber.
+// NÃO alteram roteamento/envio/reset (isso é C3). Todas escopadas por tenant
+// via instance.apiClientId.
+
+// Adiciona um número (InstanceNumber) sob uma instância do tenant.
+// Valida que a instância pertence ao tenant (senão InstanceError NOT_FOUND).
+export async function addNumber(input: {
+  instanceId: string
+  provider: Provider
+  label?: string
+  priority?: number
+  apiClientId: string
+}): Promise<InstanceNumber> {
+  const instance = await prisma.instance.findFirst({
+    where: { id: input.instanceId, apiClientId: input.apiClientId },
+    select: { id: true },
+  })
+  if (!instance) {
+    throw new InstanceError('Instância não encontrada', 'NOT_FOUND')
+  }
+
+  return createNumber({
+    instanceId: instance.id,
+    provider: input.provider,
+    label: input.label,
+    priority: input.priority,
+  })
+}
+
+// Registra a URL de webhook inbound POR NÚMERO no provider (best-effort).
+// A URL aponta para o identificador do número (.../number/:numberId), de forma
+// ADITIVA ao caminho por instância. Não lança: falha aqui não bloqueia o connect.
+export async function registerNumberInboundWebhook(
+  number: InstanceNumber,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  try {
+    const provider = providers[number.provider]
+    const providerInstanceId = number.providerInstanceId ?? `num-${number.id}`
+    const url = `${config.app.publicBaseUrl}/v1/webhooks/inbound/${number.provider.toLowerCase()}/number/${number.id}`
+    await provider.setWebhook(providerInstanceId, url)
+    log.info(`[Numbers] webhook inbound registrado (${number.provider}): ${url}`)
+  } catch (err: any) {
+    log.warn(`[Numbers] setWebhook falhou (${number.provider}, best-effort): ${err.message}`)
+  }
+}
+
+// Cria a sessão no provider na 1ª vez (persistindo providerInstanceId) e renova
+// o QR via connect(). Espelha refreshQr() mas escreve no InstanceNumber.
+// Lança em caso de erro do provider.
+export async function refreshQrNumber(number: InstanceNumber): Promise<InstanceNumber> {
+  const provider = providers[number.provider]
+  let providerInstanceId = number.providerInstanceId
+  let qrCode: string | undefined
+
+  if (!providerInstanceId) {
+    // 1ª conexão: cria a sessão no provider e persiste o providerInstanceId
+    const created = await provider.createInstance(`num-${number.id}`)
+    providerInstanceId = created.instanceId
+    qrCode = created.qrCode
+  } else {
+    // Já existe no provider: reconecta para obter o QR atual (sem recriar)
+    const result = await provider.connect(providerInstanceId)
+    qrCode = result.qrCode
+  }
+
+  return prisma.instanceNumber.update({
+    where: { id: number.id },
+    data: {
+      providerInstanceId,
+      qrCode: qrCode ?? null,
+      qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000),
+      connectionState: 'QR_PENDING',
+    },
+  })
+}
+
+// Conecta o número: Cloud API vira CONNECTED; demais geram/renova QR.
+// Espelha connectInstance() escrevendo no InstanceNumber. Registra o webhook
+// inbound por número (best-effort). Lança em caso de erro do provider.
+export async function connectNumber(
+  number: InstanceNumber,
+  log: FastifyBaseLogger,
+): Promise<ConnectResult> {
+  if (number.provider === 'CLOUD_API') {
+    const updated = await prisma.instanceNumber.update({
+      where: { id: number.id },
+      data: { connectionState: 'CONNECTED', qrCode: null, qrExpiresAt: null },
+    })
+    return {
+      instanceId: updated.providerInstanceId,
+      qrCode: null,
+      qrExpiresAt: null,
+      connectionState: updated.connectionState,
+    }
+  }
+
+  await registerNumberInboundWebhook(number, log)
+  const updated = await refreshQrNumber(number)
+  return {
+    instanceId: updated.providerInstanceId,
+    qrCode: updated.qrCode,
+    qrExpiresAt: updated.qrExpiresAt,
+    connectionState: updated.connectionState,
+  }
+}
+
+// Consulta o status no provider e persiste o connectionState mapeado no número.
+// Espelha syncInstanceStatus(). Lança em caso de erro do provider.
+export async function syncNumberStatus(
+  number: InstanceNumber,
+): Promise<InstanceNumber['connectionState']> {
+  const provider = providers[number.provider]
+  const providerStatus = await provider.getInstanceStatus(number.providerInstanceId ?? 'default')
+  const connectionState = mapConnectionState(providerStatus, number.connectionState)
+  await prisma.instanceNumber.update({
+    where: { id: number.id },
+    data: { connectionState },
+  })
+  return connectionState
+}
+
+// Remove um número do pool (escopado por tenant). Best-effort no provider:
+// tenta deleteInstance(providerInstanceId) e segue mesmo em caso de falha.
+// Retorna false se o número não for do tenant (404 no caller).
+export async function deleteNumber(
+  numberId: string,
+  apiClientId: string,
+  log?: FastifyBaseLogger,
+): Promise<boolean> {
+  const number = await findNumberScoped(numberId, apiClientId)
+  if (!number) return false
+
+  if (number.providerInstanceId) {
+    try {
+      await providers[number.provider].deleteInstance(number.providerInstanceId)
+    } catch (err: any) {
+      log?.warn(`[Numbers] Falha ao remover número no provider (best-effort): ${err.message}`)
+    }
+  }
+
+  await prisma.instanceNumber.delete({ where: { id: number.id } })
+  return true
+}
+
 // Consulta o status no provider e persiste o connectionState mapeado.
 // Lança em caso de erro do provider (caller decide o status HTTP).
 export async function syncInstanceStatus(

@@ -69,6 +69,59 @@ export async function webhooksRoutes(app: FastifyInstance) {
 
 // Mapeia o connectionState do payload para o estado do banco (já vem normalizado).
 export async function inboundWebhooksRoutes(app: FastifyInstance) {
+  // ── Fase C2: inbound POR NÚMERO (InstanceNumber) ─────────────
+  // ADITIVO ao inbound por instância (que segue intacto). Registrado ANTES da
+  // rota genérica :instanceId para que o segmento literal "number" não seja
+  // capturado como instanceId.
+  // C3: tratamento de status de entrega por número (atualmente só conexão/QR);
+  // o casamento de Message ainda é por instância no fluxo legado de envio.
+  app.post<{ Params: { provider: string; numberId: string } }>(
+    '/webhooks/inbound/:provider/number/:numberId',
+    async (request, reply) => {
+      const { provider: providerParam, numberId } = request.params
+
+      const provider = normalizeProvider(providerParam)
+      if (!provider) {
+        request.log.warn(`[Inbound] Provider desconhecido: ${providerParam}`)
+        return reply.status(404).send({ error: 'Provider desconhecido' })
+      }
+
+      // Resolve o InstanceNumber. 200 (não 404) se inexistente, para o provider
+      // não re-tentar em loop por config de webhook órfã.
+      const number = await prisma.instanceNumber.findUnique({ where: { id: numberId } })
+      if (!number) {
+        request.log.warn(`[Inbound] Número inexistente: ${numberId} (provider=${provider})`)
+        return reply.status(200).send({ ignored: true, reason: 'number_not_found' })
+      }
+
+      try {
+        const update = mapInboundStatus(provider, request.body)
+        if (!update) {
+          return reply.status(200).send({ ignored: true, reason: 'unparseable' })
+        }
+
+        // Eventos de conexão/QR → atualizam o próprio número.
+        if (update.connectionState) {
+          await prisma.instanceNumber.update({
+            where: { id: number.id },
+            data: { connectionState: update.connectionState },
+          })
+        }
+        if (update.qrCode) {
+          await prisma.instanceNumber.update({
+            where: { id: number.id },
+            data: { qrCode: update.qrCode, connectionState: 'QR_PENDING' },
+          })
+        }
+
+        return reply.status(200).send({ ok: true })
+      } catch (err: any) {
+        request.log.error(`[Inbound] Erro ao processar callback de número (${provider}): ${err.message}`)
+        return reply.status(200).send({ ok: false })
+      }
+    },
+  )
+
   app.post<{ Params: { provider: string; instanceId: string } }>(
     '/webhooks/inbound/:provider/:instanceId',
     async (request, reply) => {

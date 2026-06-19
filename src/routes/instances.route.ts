@@ -18,6 +18,13 @@ import {
   findInstanceByIdOrSlug,
   updateInstance,
   InstanceError,
+  listNumbers,
+  addNumber,
+  findNumberScoped,
+  connectNumber,
+  refreshQrNumber,
+  syncNumberStatus,
+  deleteNumber,
 } from '../services/instance.service'
 import { slugSchema } from '../utils/slug'
 
@@ -41,6 +48,13 @@ const updateInstanceSchema = z
 
 const patchStatusSchema = z.object({
   status: z.enum(['ACTIVE', 'WARMING', 'BANNED', 'SUSPENDED', 'RETIRED']),
+})
+
+// Fase C2: adicionar número ao pool de uma instância.
+const addNumberSchema = z.object({
+  provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
+  label: z.string().optional(),
+  priority: z.number().int().min(0).default(0),
 })
 
 const chatSchema = z.object({
@@ -336,6 +350,183 @@ export async function instancesRoutes(app: FastifyInstance) {
       })
     },
   })
+
+  // ══════════════════════════════════════════════════════════════
+  // FASE C2 — GESTÃO DE NÚMEROS DO POOL (InstanceNumber)
+  // Operações de conexão/QR/status POR NÚMERO, escopadas por tenant.
+  // Aceita id OU slug da instância em :id (findInstanceByIdOrSlug).
+  // ══════════════════════════════════════════════════════════════
+
+  // ── POST /instances/:id/numbers — Adiciona número ao pool ─────
+  app.post<{ Params: { id: string } }>('/instances/:id/numbers', {
+    preHandler: authManage,
+    handler: async (request, reply) => {
+      const body = addNumberSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      try {
+        const number = await addNumber({
+          instanceId: instance.id,
+          provider: body.data.provider,
+          label: body.data.label,
+          priority: body.data.priority,
+          apiClientId: request.apiClient!.id,
+        })
+        return reply.status(201).send(number)
+      } catch (err: any) {
+        if (err instanceof InstanceError && err.code === 'NOT_FOUND') {
+          return reply.status(404).send({ error: err.message })
+        }
+        request.log.error(`[Numbers] Falha ao adicionar número: ${err.message}`)
+        return reply.status(500).send({ error: 'Falha ao adicionar o número' })
+      }
+    },
+  })
+
+  // ── GET /instances/:id/numbers — Lista números do pool ────────
+  app.get<{ Params: { id: string } }>('/instances/:id/numbers', {
+    preHandler: authManage,
+    handler: async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      const numbers = await listNumbers(instance.id)
+      return reply.send(numbers)
+    },
+  })
+
+  // ── POST /instances/:id/numbers/:numberId/connect — Conecta número ─
+  app.post<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId/connect',
+    {
+      preHandler: authManage,
+      handler: async (request, reply) => {
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+        const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+        if (!number || number.instanceId !== instance.id) {
+          return reply.status(404).send({ error: 'Número não encontrado' })
+        }
+
+        try {
+          const result = await connectNumber(number, request.log)
+          return reply.send(result)
+        } catch (err: any) {
+          request.log.error(`[Numbers] connect falhou (${number.provider}): ${err.message}`)
+          return reply.status(502).send({
+            error: 'Falha ao conectar no provider',
+            provider: number.provider,
+            detail: err?.response?.data?.message ?? err.message,
+          })
+        }
+      },
+    },
+  )
+
+  // ── GET /instances/:id/numbers/:numberId/qr — QR atual (renova se expirado) ─
+  app.get<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId/qr',
+    {
+      preHandler: authManage,
+      handler: async (request, reply) => {
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+        const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+        if (!number || number.instanceId !== instance.id) {
+          return reply.status(404).send({ error: 'Número não encontrado' })
+        }
+
+        if (number.provider === 'CLOUD_API') {
+          return reply.status(400).send({ error: 'Cloud API não utiliza QR Code' })
+        }
+
+        const now = Date.now()
+        const expired = !number.qrExpiresAt || number.qrExpiresAt.getTime() < now
+
+        // QR válido em cache — retorna direto
+        if (number.qrCode && !expired) {
+          return reply.send({
+            qrCode: number.qrCode,
+            qrExpiresAt: number.qrExpiresAt,
+            connectionState: number.connectionState,
+          })
+        }
+
+        // Expirado (ou inexistente) — renova via connect (NÃO recria a sessão)
+        try {
+          const updated = await refreshQrNumber(number)
+          return reply.send({
+            qrCode: updated.qrCode,
+            qrExpiresAt: updated.qrExpiresAt,
+            connectionState: updated.connectionState,
+          })
+        } catch (err: any) {
+          request.log.error(`[Numbers] qr refresh falhou (${number.provider}): ${err.message}`)
+          return reply.status(502).send({
+            error: 'Falha ao renovar QR no provider',
+            provider: number.provider,
+            detail: err?.response?.data?.message ?? err.message,
+          })
+        }
+      },
+    },
+  )
+
+  // ── GET /instances/:id/numbers/:numberId/status — Status no provider ─
+  app.get<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId/status',
+    {
+      preHandler: authManage,
+      handler: async (request, reply) => {
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+        const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+        if (!number || number.instanceId !== instance.id) {
+          return reply.status(404).send({ error: 'Número não encontrado' })
+        }
+
+        try {
+          const connectionState = await syncNumberStatus(number)
+          return reply.send({ connectionState })
+        } catch (err: any) {
+          request.log.error(`[Numbers] status falhou (${number.provider}): ${err.message}`)
+          return reply.status(502).send({
+            error: 'Falha ao consultar status no provider',
+            provider: number.provider,
+            detail: err?.response?.data?.message ?? err.message,
+          })
+        }
+      },
+    },
+  )
+
+  // ── DELETE /instances/:id/numbers/:numberId — Remove número do pool ─
+  app.delete<{ Params: { id: string; numberId: string } }>(
+    '/instances/:id/numbers/:numberId',
+    {
+      preHandler: authManage,
+      handler: async (request, reply) => {
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+        const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
+        if (!number || number.instanceId !== instance.id) {
+          return reply.status(404).send({ error: 'Número não encontrado' })
+        }
+
+        await deleteNumber(number.id, request.apiClient!.id, request.log)
+        return reply.status(204).send()
+      },
+    },
+  )
 
   // ══════════════════════════════════════════════════════════════
   // ENVIO POR TOKEN DE INSTÂNCIA (preHandler: authInstance, header Token)
