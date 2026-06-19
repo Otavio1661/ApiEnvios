@@ -4,9 +4,15 @@
 // web admin (src/web/panel.route.ts). NÃO contém regra de negócio nova: apenas
 // centraliza a transação atômica e as validações de unicidade que antes estavam
 // inline na rota — assim API e painel compartilham EXATAMENTE o mesmo comportamento.
-import type { ApiClient, User } from '@prisma/client'
+import { Prisma, type ApiClient, type User } from '@prisma/client'
 import { prisma } from '../utils/prisma'
 import { hashPassword } from '../utils/password'
+
+// True quando o erro é a violação de unicidade (@unique) do Prisma — código P2002.
+// Usado para tratar a corrida (TOCTOU) entre o pré-check e o insert do e-mail.
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
+}
 
 // Erro de negócio do provisionamento (ex.: e-mail duplicado, conta inexistente).
 // O caller decide como mapear: a API REST vira status HTTP; o painel vira ?err=.
@@ -57,23 +63,33 @@ export async function createClientWithOwner(
   // Hash fora da transação (operação CPU-bound); criação conta+owner é atômica.
   const ownerHash = ownerEmail && ownerPassword ? await hashPassword(ownerPassword) : null
 
-  return prisma.$transaction(async (tx) => {
-    const client = await tx.apiClient.create({ data: clientData })
-    let owner: OwnerSummary | undefined
-    if (ownerEmail && ownerHash) {
-      const user = await tx.user.create({
-        data: {
-          email: ownerEmail,
-          passwordHash: ownerHash,
-          name: ownerName,
-          role: 'OWNER',
-          apiClientId: client.id,
-        },
-      })
-      owner = { id: user.id, email: user.email, name: user.name, role: user.role }
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const client = await tx.apiClient.create({ data: clientData })
+      let owner: OwnerSummary | undefined
+      if (ownerEmail && ownerHash) {
+        const user = await tx.user.create({
+          data: {
+            email: ownerEmail,
+            passwordHash: ownerHash,
+            name: ownerName,
+            role: 'OWNER',
+            apiClientId: client.id,
+          },
+        })
+        owner = { id: user.id, email: user.email, name: user.name, role: user.role }
+      }
+      return { client, owner }
+    })
+  } catch (err) {
+    // TOCTOU: o pré-check passou, mas outro insert concorrente cravou o mesmo e-mail
+    // antes da transação — o banco rejeita pelo @unique (P2002). Relança como
+    // erro de negócio para o caller mapear (REST → 409; painel → ?err=).
+    if (isUniqueViolation(err)) {
+      throw new ProvisioningError('E-mail de owner já cadastrado', 'EMAIL_TAKEN')
     }
-    return { client, owner }
-  })
+    throw err
+  }
 }
 
 export interface CreateUserInput {
@@ -100,15 +116,24 @@ export async function createUserForClient(input: CreateUserInput): Promise<User>
     throw new ProvisioningError('E-mail já cadastrado', 'EMAIL_TAKEN')
   }
 
-  return prisma.user.create({
-    data: {
-      email: input.email,
-      passwordHash: await hashPassword(input.password),
-      name: input.name,
-      role: input.role,
-      apiClientId: input.apiClientId,
-    },
-  })
+  try {
+    return await prisma.user.create({
+      data: {
+        email: input.email,
+        passwordHash: await hashPassword(input.password),
+        name: input.name,
+        role: input.role,
+        apiClientId: input.apiClientId,
+      },
+    })
+  } catch (err) {
+    // TOCTOU: e-mail cravado por insert concorrente entre o pré-check e este insert.
+    // P2002 vira EMAIL_TAKEN (409) em vez de 500.
+    if (isUniqueViolation(err)) {
+      throw new ProvisioningError('E-mail já cadastrado', 'EMAIL_TAKEN')
+    }
+    throw err
+  }
 }
 
 // Lista as contas (tenants) com contagem de instâncias e usuários.

@@ -67,14 +67,23 @@ export const config = {
   // Admin inicial do painel, provisionado pelo seed a partir do ambiente.
   // Sem valores default para email/senha: vazio = criação do admin desativada
   // (o seed roda normalmente, apenas pula a etapa). NUNCA hardcode credenciais.
-  adminSeed: {
-    email: process.env.ADMIN_SEED_EMAIL ?? '',
-    password: process.env.ADMIN_SEED_PASSWORD ?? '',
-    name: process.env.ADMIN_SEED_NAME ?? 'Administrador',
-    // Habilitado apenas quando email e senha estão ambos preenchidos.
-    enabled: Boolean(process.env.ADMIN_SEED_EMAIL && process.env.ADMIN_SEED_PASSWORD),
-  },
+  adminSeed: adminSeedConfig(),
 } as const
+
+// Lê as variáveis ADMIN_SEED já com .trim() — valores só com espaços contam como
+// vazios. enabled deriva dos valores trimados (email e senha ambos preenchidos).
+function adminSeedConfig() {
+  const email = (process.env.ADMIN_SEED_EMAIL ?? '').trim()
+  const password = (process.env.ADMIN_SEED_PASSWORD ?? '').trim()
+  const name = (process.env.ADMIN_SEED_NAME ?? '').trim() || 'Administrador'
+  return {
+    email,
+    password,
+    name,
+    // Habilitado apenas quando email e senha estão ambos preenchidos (já trimados).
+    enabled: Boolean(email && password),
+  }
+}
 
 // Guard de produção: nunca subir com segredos no valor dev (risco de forja de token/auth).
 if (!config.app.isDev) {

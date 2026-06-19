@@ -78,7 +78,8 @@ async function main() {
       name: 'Suporte',
       label: 'Número Fallback - WAHA',
       provider: 'WAHA',
-      instanceId: 'waha-session-01',
+      // Sessão WAHA real conectada no ambiente dev (engine NOWEB) é a 'default'.
+      instanceId: 'default',
       token: 'dev-instance-token-02',
       status: 'ACTIVE',
       priority: 1,

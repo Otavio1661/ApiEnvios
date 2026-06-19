@@ -37,7 +37,7 @@ export class WahaProvider implements IWhatsappProvider {
 
       return {
         success: true,
-        providerId: response.data?.id,
+        providerId: this.extractMessageId(response.data),
         duration: Date.now() - start,
       }
     } catch (err: any) {
@@ -65,12 +65,20 @@ export class WahaProvider implements IWhatsappProvider {
 
       return {
         success: true,
-        providerId: response.data?.id,
+        providerId: this.extractMessageId(response.data),
         duration: Date.now() - start,
       }
     } catch (err: any) {
       return this.handleError(err, Date.now() - start)
     }
+  }
+
+  // Extrai o ID externo da mensagem de forma robusta entre engines do WAHA.
+  // A engine NOWEB (a usada aqui) retorna a chave em `data.key.id` — NÃO há `data.id`
+  // de topo. Mantemos fallbacks para outras engines/formatos por robustez.
+  private extractMessageId(data: any): string | undefined {
+    const id = data?.id ?? data?.key?.id ?? data?.message?.key?.id
+    return id != null ? String(id) : undefined
   }
 
   async getInstanceStatus(instanceId: string): Promise<InstanceStatus> {
