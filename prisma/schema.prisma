@@ -53,12 +53,56 @@ model Instance {
 
   messages    Message[]
   rotations   NumberRotation[]
+  numbers     InstanceNumber[]   // Fase C1: pool de números filhos (aditivo; lógica ainda usa os campos acima)
 
   @@unique([apiClientId, phone])
   @@unique([apiClientId, name])           // apelido único por tenant (NULLs distintos no Postgres)
   @@index([status, priority])
   @@index([provider])
   @@index([apiClientId, status])
+}
+
+// ─────────────────────────────────────────────
+// NÚMEROS DA INSTÂNCIA (Fase C1 — Instância como pool de números)
+// Cada InstanceNumber é um número/sessão de provider sob uma Instance.
+// ADITIVO: nesta fase os campos espelham os da Instance; o roteamento/QR/envio
+// continua usando a Instance. C2/C3/C4 movem a lógica e removem os legados.
+// ─────────────────────────────────────────────
+model InstanceNumber {
+  id         String   @id @default(cuid())
+
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  provider           Provider
+  providerInstanceId String?               // ID da sessão no provider (= Instance.instanceId)
+  phone              String?
+  label              String?
+  status             NumberStatus      @default(ACTIVE)
+  priority           Int               @default(0)
+
+  // Estado de conexão (autenticação/QR)
+  connectionState InstanceConnState @default(DISCONNECTED)
+  qrCode          String?
+  qrExpiresAt     DateTime?
+
+  // Métricas anti-ban
+  sentToday   Int       @default(0)
+  sentTotal   Int       @default(0)
+  lastSentAt  DateTime?
+  lastResetAt DateTime  @default(now())
+
+  // Ban tracking
+  bannedAt    DateTime?
+  banReason   String?
+  bannedCount Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([instanceId, phone])
+  @@index([instanceId])
+  @@index([status, priority])
 }
 
 // ─────────────────────────────────────────────

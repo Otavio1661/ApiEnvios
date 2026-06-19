@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client'
 
 const prismaMock = vi.hoisted(() => ({
   instance: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+  instanceNumber: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
 }))
 vi.mock('../utils/prisma', () => ({ prisma: prismaMock }))
 
@@ -15,6 +16,8 @@ import {
   createInstance,
   updateInstance,
   InstanceError,
+  createNumber,
+  findNumberScoped,
 } from './instance.service'
 
 function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
@@ -102,5 +105,41 @@ describe('updateInstance — renomear', () => {
     const err = await updateInstance({ id: 'i-1', apiClientId: 'tenant-A', name: 'Dup' }).catch((e) => e)
     expect(err).toBeInstanceOf(InstanceError)
     expect(err.code).toBe('NAME_TAKEN')
+  })
+})
+
+// ── Fase C1: helpers de InstanceNumber ───────────────────────────
+describe('createNumber', () => {
+  it('cria número sob a instância com defaults de priority', async () => {
+    prismaMock.instanceNumber.create.mockResolvedValueOnce({ id: 'n-1' })
+    const out = await createNumber({ instanceId: 'i-1', provider: 'EVOLUTION', label: 'Vendas' })
+    expect(out).toMatchObject({ id: 'n-1' })
+    expect(prismaMock.instanceNumber.create).toHaveBeenCalledWith({
+      data: { instanceId: 'i-1', provider: 'EVOLUTION', label: 'Vendas', priority: 0 },
+    })
+  })
+
+  it('respeita priority informado', async () => {
+    prismaMock.instanceNumber.create.mockResolvedValueOnce({ id: 'n-2' })
+    await createNumber({ instanceId: 'i-1', provider: 'WAHA', priority: 5 })
+    expect(prismaMock.instanceNumber.create).toHaveBeenCalledWith({
+      data: { instanceId: 'i-1', provider: 'WAHA', label: undefined, priority: 5 },
+    })
+  })
+})
+
+describe('findNumberScoped', () => {
+  it('escopa a busca pela instância do tenant (instance.apiClientId)', async () => {
+    prismaMock.instanceNumber.findFirst.mockResolvedValueOnce({ id: 'n-1', instanceId: 'i-1' })
+    const out = await findNumberScoped('n-1', 'tenant-A')
+    expect(out).toMatchObject({ id: 'n-1' })
+    expect(prismaMock.instanceNumber.findFirst).toHaveBeenCalledWith({
+      where: { id: 'n-1', instance: { apiClientId: 'tenant-A' } },
+    })
+  })
+
+  it('retorna null quando o número não é do tenant', async () => {
+    prismaMock.instanceNumber.findFirst.mockResolvedValueOnce(null)
+    expect(await findNumberScoped('n-x', 'tenant-B')).toBeNull()
   })
 })

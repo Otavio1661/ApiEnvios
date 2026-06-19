@@ -2,7 +2,7 @@
 // Lógica compartilhada de instâncias (gestão/QR/status) reusada tanto pela API REST
 // (src/routes/instances.route.ts) quanto pelo painel web (src/web/panel.route.ts).
 // NÃO contém regra de negócio nova: apenas centraliza o que antes estava inline na rota.
-import { Prisma, type Instance } from '@prisma/client'
+import { Prisma, type Instance, type InstanceNumber, type Provider } from '@prisma/client'
 import type { FastifyBaseLogger } from 'fastify'
 import { prisma } from '../utils/prisma'
 import { config } from '../config'
@@ -267,6 +267,46 @@ export async function connectInstance(
     qrExpiresAt: updated.qrExpiresAt,
     connectionState: updated.connectionState,
   }
+}
+
+// ── Fase C1: pool de números (InstanceNumber) ────────────────────
+// Helpers ADITIVOS. Nesta fase o roteamento/QR/envio NÃO usa estes números
+// (continua usando os campos da Instance). C2/C3/C4 religam a lógica aqui.
+
+// Lista os números de uma instância, em ordem de prioridade (menor = primeiro).
+export function listNumbers(instanceId: string): Promise<InstanceNumber[]> {
+  return prisma.instanceNumber.findMany({
+    where: { instanceId },
+    orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+  })
+}
+
+// Cria um número (InstanceNumber) sob uma instância.
+export function createNumber(input: {
+  instanceId: string
+  provider: Provider
+  label?: string
+  priority?: number
+}): Promise<InstanceNumber> {
+  return prisma.instanceNumber.create({
+    data: {
+      instanceId: input.instanceId,
+      provider: input.provider,
+      label: input.label,
+      priority: input.priority ?? 0,
+    },
+  })
+}
+
+// Busca um número por id garantindo que pertence a uma instância do tenant
+// (escopo via instance.apiClientId). Retorna null se não for do tenant.
+export function findNumberScoped(
+  numberId: string,
+  apiClientId: string,
+): Promise<InstanceNumber | null> {
+  return prisma.instanceNumber.findFirst({
+    where: { id: numberId, instance: { apiClientId } },
+  })
 }
 
 // Consulta o status no provider e persiste o connectionState mapeado.
