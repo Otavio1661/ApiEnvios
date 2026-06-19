@@ -3,11 +3,39 @@
 
 import type { ApiClient, Instance } from '@prisma/client'
 
+// ── Payload do JWT de login humano ───────────────────────────
+export interface JwtUserPayload {
+  userId: string
+  apiClientId: string
+  accountRole: string   // papel de plataforma da conta (ClientRole: ADMIN | CLIENT)
+}
+
+// ── Dados do usuário autenticado anexados pelo guard authJwt ──
+export interface AuthUser {
+  id: string
+  email: string
+  name: string | null
+  role: string          // papel dentro da conta (UserRole: OWNER | MEMBER)
+}
+
 // ── Augmentação do Fastify: contexto de autenticação ─────────
 declare module 'fastify' {
   interface FastifyRequest {
     apiClient?: ApiClient
     instance?: Instance
+    // Dados do usuário humano (login JWT). Mantido SEPARADO de `request.user`
+    // (que o @fastify/jwt reserva para o payload do token) para evitar conflito.
+    authUser?: AuthUser
+  }
+}
+
+// ── Alinha o tipo de `request.user`/`jwtVerify()` do @fastify/jwt ──
+// O @fastify/jwt declara `request.user` a partir de FastifyJWT['user'].
+// Definimos o payload aqui para tipar com segurança jwt.sign/jwtVerify.
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: JwtUserPayload
+    user: JwtUserPayload
   }
 }
 

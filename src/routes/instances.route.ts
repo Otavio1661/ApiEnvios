@@ -2,18 +2,19 @@
 // Ciclo de vida de instância (gestão por API key de conta) + QR Code + envio por token.
 // Reaproveita os métodos já existentes dos providers (createInstance/getInstanceStatus/deleteInstance).
 import type { FastifyInstance } from 'fastify'
-import type { Instance } from '@prisma/client'
 import { z } from 'zod'
-import { authAccount, authInstance } from '../middlewares/auth.middleware'
+import { authManage, authInstance } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
-import { config } from '../config'
 import { providers } from '../providers'
 import { enqueueSend } from '../queues/send-message.queue'
 import { normalizePhone } from '../utils/helpers'
 import type { MessageType } from '../types'
-
-// Tempo de validade do QR em segundos
-const QR_TTL_SECONDS = 45
+import {
+  toInstanceResponse,
+  refreshQr,
+  registerInboundWebhook,
+  syncInstanceStatus,
+} from '../services/instance.service'
 
 // ── Schemas Zod ───────────────────────────────────────────────
 const createInstanceSchema = z.object({
@@ -38,91 +39,14 @@ const mediaSchema = z.object({
   type: z.enum(['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT']).default('IMAGE'),
 })
 
-// ── Helpers ───────────────────────────────────────────────────
-// Monta a representação UltraMsg da instância, incluindo apiUrl pública.
-function toInstanceResponse(instance: Instance) {
-  return {
-    ...instance,
-    apiUrl: `${config.app.publicBaseUrl}/v1/instance/${instance.id}`,
-  }
-}
-
-// Mapeia o status do provider para o connectionState do banco.
-function mapConnectionState(
-  status: string,
-  current: Instance['connectionState'],
-): Instance['connectionState'] {
-  switch (status) {
-    case 'connected':
-      return 'CONNECTED'
-    case 'disconnected':
-      return 'DISCONNECTED'
-    case 'qr_required':
-      return 'QR_PENDING'
-    case 'banned':
-      return 'BANNED'
-    default:
-      return current // 'unknown' → mantém o estado atual
-  }
-}
-
-// Cria a instância no provider na 1ª vez (persistindo instanceId) e renova o QR
-// via connect(). Centraliza a lógica compartilhada entre connect e qr.
-// Retorna a instância atualizada. Lança em caso de erro do provider.
-async function refreshQr(instance: Instance): Promise<Instance> {
-  const provider = providers[instance.provider]
-  let providerInstanceId = instance.instanceId
-  let qrCode: string | undefined
-
-  if (!providerInstanceId) {
-    // 1ª conexão: cria a instância no provider e persiste o instanceId
-    const created = await provider.createInstance(`inst-${instance.id}`)
-    providerInstanceId = created.instanceId
-    qrCode = created.qrCode
-  } else {
-    // Já existe no provider: reconecta para obter o QR atual (sem recriar)
-    const result = await provider.connect(providerInstanceId)
-    qrCode = result.qrCode
-  }
-
-  return prisma.instance.update({
-    where: { id: instance.id },
-    data: {
-      instanceId: providerInstanceId,
-      qrCode: qrCode ?? null,
-      qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000),
-      connectionState: 'QR_PENDING',
-    },
-  })
-}
-
-// Registra a URL de webhook inbound no provider (best-effort).
-// A URL aponta para o endpoint público desta API; o provider chamará nela a cada evento.
-// Não lança: falha aqui não deve bloquear o connect (logamos e seguimos).
-async function registerInboundWebhook(
-  instance: Instance,
-  log: FastifyInstance['log'],
-): Promise<void> {
-  try {
-    const provider = providers[instance.provider]
-    // Nome da instância no provider (mesma convenção do refreshQr na 1ª conexão).
-    const providerInstanceId = instance.instanceId ?? `inst-${instance.id}`
-    const url = `${config.app.publicBaseUrl}/v1/webhooks/inbound/${instance.provider.toLowerCase()}/${instance.id}`
-    await provider.setWebhook(providerInstanceId, url)
-    log.info(`[Instances] webhook inbound registrado (${instance.provider}): ${url}`)
-  } catch (err: any) {
-    log.warn(`[Instances] setWebhook falhou (${instance.provider}, best-effort): ${err.message}`)
-  }
-}
-
 export async function instancesRoutes(app: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════
-  // GESTÃO (preHandler: authAccount, escopado por request.apiClient.id)
+  // GESTÃO (preHandler: authManage, escopado por request.apiClient.id)
   // ══════════════════════════════════════════════════════════════
 
   // ── POST /instances — Cria registro de instância para o tenant ─
   app.post('/instances', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const body = createInstanceSchema.safeParse(request.body)
       if (!body.success) {
@@ -144,7 +68,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── GET /instances — Lista instâncias do tenant ───────────────
   app.get('/instances', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const instances = await prisma.instance.findMany({
         where: { apiClientId: request.apiClient!.id },
@@ -156,7 +80,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── GET /instances/stats — Dashboard rápido (escopado) ────────
   app.get('/instances/stats', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const apiClientId = request.apiClient!.id
       const [active, banned, total, sentToday] = await Promise.all([
@@ -177,7 +101,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── GET /instances/:id — Detalhe (404 se não for do tenant) ───
   app.get<{ Params: { id: string } }>('/instances/:id', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const instance = await prisma.instance.findFirst({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },
@@ -189,7 +113,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── DELETE /instances/:id — Remove (best-effort no provider) ──
   app.delete<{ Params: { id: string } }>('/instances/:id', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const instance = await prisma.instance.findFirst({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },
@@ -212,7 +136,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── POST /instances/:id/connect — Cria/conecta no provider, gera QR ─
   app.post<{ Params: { id: string } }>('/instances/:id/connect', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const instance = await prisma.instance.findFirst({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },
@@ -259,7 +183,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── GET /instances/:id/qr — Retorna QR atual (renova se expirado) ─
   app.get<{ Params: { id: string } }>('/instances/:id/qr', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const instance = await prisma.instance.findFirst({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },
@@ -303,24 +227,15 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── GET /instances/:id/status — Consulta status no provider ───
   app.get<{ Params: { id: string } }>('/instances/:id/status', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const instance = await prisma.instance.findFirst({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },
       })
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
-      const provider = providers[instance.provider]
-
       try {
-        const providerStatus = await provider.getInstanceStatus(instance.instanceId ?? 'default')
-        const connectionState = mapConnectionState(providerStatus, instance.connectionState)
-
-        await prisma.instance.update({
-          where: { id: instance.id },
-          data: { connectionState },
-        })
-
+        const connectionState = await syncInstanceStatus(instance)
         return reply.send({ connectionState })
       } catch (err: any) {
         request.log.error(`[Instances] status falhou (${instance.provider}): ${err.message}`)
@@ -335,7 +250,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── PATCH /instances/:id/status — Muda status de ciclo de vida ─
   app.patch<{ Params: { id: string } }>('/instances/:id/status', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const body = patchStatusSchema.safeParse(request.body)
       if (!body.success) {
@@ -358,7 +273,7 @@ export async function instancesRoutes(app: FastifyInstance) {
 
   // ── POST /instances/:id/rotate — Rotação manual ───────────────
   app.post<{ Params: { id: string } }>('/instances/:id/rotate', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const existing = await prisma.instance.findFirst({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },

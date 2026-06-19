@@ -8,24 +8,31 @@
 
 ## 1. O que é o projeto
 
-API de envio de mensagens WhatsApp com **fallback automático entre 3 providers** e
-**rotação de números** para minimizar banimentos. A API serve como camada única para
-vários sistemas clientes enviarem notificações via WhatsApp.
+Plataforma **multi-instância multi-tenant** de envio de WhatsApp, no modelo **UltraMsg**:
+serve como ponte de terceiro **Sistemas → ApiEnvios → usuários**. Cada conta (tenant)
+possui **instâncias dedicadas**, cada uma com seu **Status de autenticação, API URL,
+ID da instância e Token**. Aplicações externas autenticam por **token de instância**;
+o dono da conta gerencia tudo por uma **API key de conta**.
 
-**Objetivo principal:** maximizar entregabilidade gratuita, caindo para a API oficial
-(paga) só quando as opções gratuitas falham.
+Suporta 3 providers (Evolution / WAHA / Cloud API). O **fallback automático entre
+providers é OPT-IN por tenant** (`ApiClient.fallbackEnabled`) e ocorre apenas entre as
+instâncias **do próprio tenant** (+ Cloud API como último recurso). Por padrão o envio é
+**dedicado à instância informada**.
 
-### Cadeia de fallback
+**Objetivo principal:** entregabilidade com isolamento por tenant e mitigação de ban
+(espaçamento anti-ban serializado por instância, warm-up de números novos, rotação).
+
+### Modelo de envio
 ```
-Sistema Cliente → ApiEnvios
-                      │
-   1️⃣ Evolution API   (principal, grátis)
-   2️⃣ WAHA            (fallback grátis)
-   3️⃣ WhatsApp Cloud API (fallback oficial/pago)
+Sistema Cliente → POST /v1/instance/:id/messages/chat (header Token)
+        → ApiEnvios (fila BullMQ + worker + gate anti-ban)
+        → provider da instância (Evolution | WAHA | Cloud API) → usuário
 ```
-- Provider 1 falha ou número banido → tenta Provider 2
-- Provider 2 falha → cai no Provider 3 (oficial)
-- Ban detectado → número marcado `BANNED` + notificação via webhook + rotação automática
+- Envio dedicado à instância do token (sem fallback por padrão).
+- `fallbackEnabled=true` → tenta outras instâncias ATIVAS do mesmo tenant, depois Cloud API.
+- Ban detectado → instância marcada `BANNED` + `connectionState=BANNED` + webhook + rotação.
+- Status de entrega (DELIVERED/READ) volta do provider via webhook inbound e é repassado
+  ao webhook do tenant (`MESSAGE_DELIVERED`).
 
 ---
 
@@ -82,112 +89,84 @@ ApiEnvios/
 
 | Tabela | Função |
 |--------|--------|
-| `WhatsappNumber` | Números com status, provider, contadores diários, ban tracking |
-| `Message` | Mensagens com status de entrega, provider usado, retries |
+| `Instance` | Instância/número de um tenant: `apiClientId`, `token`, provider, `instanceId` (id no provider), `status`, `connectionState`, `qrCode`, contadores, ban tracking |
+| `Message` | Mensagens (`apiClientId`, `instanceId`) com status de entrega, provider, retries |
 | `MessageAttempt` | Histórico de cada tentativa (provider, erro, duração) |
-| `NumberRotation` | Log de rotações (BAN, LIMIT_REACHED, MANUAL, SCHEDULED) |
-| `ApiClient` | Clientes consumidores da API (multi-tenant via API key) |
-| `Webhook` | URLs e eventos para notificação |
+| `NumberRotation` | Log de rotações (BAN, LIMIT_REACHED, MANUAL, SCHEDULED) — vinculado a `Instance` |
+| `ApiClient` | Conta/tenant: `apiKey`, `role` (ADMIN\|CLIENT), `fallbackEnabled`, `rateLimit` |
+| `Webhook` | URLs e eventos por tenant (`apiClientId` nulo = webhook global do admin) |
 
 **Enums importantes:**
 - `Provider`: EVOLUTION | WAHA | CLOUD_API
-- `NumberStatus`: ACTIVE | WARMING | BANNED | SUSPENDED | RETIRED
+- `ClientRole`: ADMIN | CLIENT
+- `NumberStatus`: ACTIVE | WARMING | BANNED | SUSPENDED | RETIRED  *(ciclo de vida da instância)*
+- `InstanceConnState`: DISCONNECTED | QR_PENDING | CONNECTED | BANNED  *(estado de conexão)*
 - `MessageStatus`: QUEUED | SENDING | SENT | DELIVERED | READ | FAILED | SCHEDULED | CANCELLED
 
 ---
 
 ## 5. ✅ O QUE JÁ FOI IMPLEMENTADO
 
-### Infraestrutura
-- [x] Estrutura completa de pastas e config TypeScript
-- [x] `docker-compose.yml` com Postgres, Redis, Evolution API (v2.3.7), WAHA
-- [x] Schema Prisma completo com todas as tabelas e relações
-- [x] Seed com cliente de dev (`dev-key-123456`) e 2 números de exemplo
-- [x] Config centralizada lendo do `.env`
+> Evolução em fases (plano em `~/.claude/plans/claude-seguindo-o-plno-sharded-fairy.md`).
+> Fases 0–5 concluídas, com `tsc` limpo e validação de runtime a cada fase. **Envio real
+> confirmado** (status `SENT`) para um número via sessão WAHA conectada.
 
-### Providers
-- [x] `EvolutionProvider` — sendText, sendMedia, status, create/delete instance, detecção de ban
-- [x] `WahaProvider` — sendText, sendMedia, status, create/delete session
-- [x] `CloudApiProvider` — sendText, sendMedia (Graph API v20.0)
-- [x] Interface comum `IWhatsappProvider` que todos implementam
+### Fase 0 — Migrations versionadas
+- [x] `prisma/migrations/` versionado (removido do `.gitignore`); baseline `init` + `fase2_instances`
 
-### Lógica de negócio
-- [x] **Fallback automático** entre os 3 providers (`provider-router.service.ts`)
-- [x] **Detecção de ban** por análise de erro
-- [x] **Marcação automática** de número banido + log de rotação
-- [x] **Delay anti-ban** aleatório entre envios (configurável)
-- [x] **Seleção de número** por prioridade + menor uso diário
-- [x] **Notificação de ban** via webhook (`notification.service.ts`)
+### Fase 1 — Multi-tenancy + token por instância (fundação)
+- [x] `WhatsappNumber` renomeado para **`Instance`** (entidade central) com `apiClientId`, `token` único, `connectionState`, `qrCode/qrExpiresAt`, `name`, `phone` opcional
+- [x] `ApiClient` com `role` (ADMIN|CLIENT) e `fallbackEnabled`; `Message`/`Webhook` com `apiClientId`
+- [x] Auth em 3 guards: `authAccount` (API key de conta), `authInstance` (header `Token`), `requireAdmin`
+- [x] **Escopo por tenant** em todas as queries (corrige vazamento entre tenants); idempotência `@@unique([apiClientId, externalId])`
 
-### API REST
-- [x] `POST /v1/messages` — envio (texto, mídia, agendado) com idempotência via externalId
-- [x] `GET /v1/messages/:id` — status de mensagem
-- [x] `GET /v1/messages` — listagem com filtros e paginação
-- [x] `GET /v1/numbers` — lista números
-- [x] `POST /v1/numbers` — cadastra número
-- [x] `PATCH /v1/numbers/:id/status` — muda status
-- [x] `POST /v1/numbers/:id/rotate` — rotaciona manualmente
-- [x] `GET /v1/numbers/stats` — dashboard rápido
-- [x] `POST/GET/DELETE /v1/webhooks` — gestão de webhooks
-- [x] `GET /health` — healthcheck
-- [x] Middleware de auth por API key
+### Fase 2 — Ciclo de vida de instância + QR (estilo UltraMsg)
+- [x] `POST/GET /v1/instances`, `GET /:id`, `DELETE /:id`, `GET /:id/stats` (escopados; cada um retorna `apiUrl`)
+- [x] `POST /:id/connect` (cria + connect/QR), `GET /:id/qr`, `GET /:id/status`
+- [x] Envio por token: `POST /v1/instance/:id/messages/chat` e `/media`
+- [x] Admin: `POST/GET /v1/admin/clients` (provisiona tenants)
+- [x] `sendViaInstance` (envio dedicado, sem fallback)
+
+### Fase 3 — Fila assíncrona BullMQ + jobs
+- [x] Fila `send-message` + worker (retry/backoff exponencial via `maxRetries`); POSTs respondem `202 QUEUED`
+- [x] Repeatable jobs: `reset-counters` (meia-noite) e `scheduled-messages` (a cada min)
+- [x] `sendWithFallback` respeita `fallbackEnabled` (só instâncias do tenant + Cloud API)
+- [x] Registry único de providers; providers ganharam `connect`/`getQr` (separados de `createInstance`)
+
+### Fase 4 — Webhooks inbound de status
+- [x] `POST /v1/webhooks/inbound/:provider/:instanceId` (sem auth; escopo via providerId + instância)
+- [x] Mapeia callbacks Evolution/WAHA/Cloud → `Message.status` (só avança SENT→DELIVERED→READ)
+- [x] `setWebhook` registrado no provider no connect; repassa `MESSAGE_DELIVERED` ao webhook do tenant
+- [x] Webhooks do tenant escopados por `apiClientId`
+
+### Fase 5 — Robustez multi-tenant
+- [x] **Rate limit por tenant** (`@fastify/rate-limit` + store Redis; key=apiClient.id, max=rateLimit)
+- [x] **Anti-ban serializado por instância** (lock Redis `lock:send:<id>` + espaçamento; `src/utils/rate-gate.ts`)
+- [x] **Health check** de instâncias (job `instances-health` a cada 3min → `PROVIDER_DOWN`)
+- [x] **Warm-up** dinâmico (`dailyLimitFor`) para instâncias WARMING
+- [x] Logger **Pino** compartilhado (`src/utils/logger.ts`) substituindo `console.*`
+
+### Compatibilidade
+- [x] Rotas legadas `/v1/numbers*` mantidas (operam sobre `Instance`)
 
 ---
 
-## 6. ⏳ O QUE FALTA IMPLEMENTAR (roadmap priorizado)
+## 6. ⏳ O QUE FALTA IMPLEMENTAR (roadmap)
 
-### 🔴 Prioridade ALTA (necessário para funcionar de verdade)
+> Itens 1–9 do roadmap original concluídos nas Fases 0–5.
 
-1. **Conexão de instâncias via QR Code**
-   - Endpoint `POST /v1/numbers/:id/connect` que cria a instância no provider e retorna o QR
-   - Endpoint `GET /v1/numbers/:id/qr` para buscar/atualizar o QR
-   - Endpoint `GET /v1/numbers/:id/connection-status` para checar se conectou
-   - *Sem isso os números não enviam — é o gargalo #1*
+### 🟢 Prioridade BAIXA / próximos passos
+- **Painel web** (estilo UltraMsg) e **JWT** para admin do painel
+- **Testes automatizados** (Vitest — providers, router, rate-gate, inbound)
+- **Suporte a templates** Cloud API (mensagens proativas)
+- **Métricas Prometheus** (`/metrics`) + **Dockerfile de produção** (multi-stage)
+- **Gestão de membros pela própria conta** (OWNER convida MEMBER) — sem signup público (decisão: provisionamento é exclusivo do admin da plataforma)
 
-2. **Fila assíncrona com BullMQ**
-   - Mover o envio do request síncrono para uma fila (`send-message` queue)
-   - Worker que consome a fila e chama `sendWithFallback`
-   - Retry com backoff exponencial usando a config de `maxRetries`
-   - *Essencial para volume — hoje o envio trava o request HTTP*
-
-3. **Webhook de status dos providers (inbound)**
-   - Receber callbacks da Evolution/WAHA sobre entrega/leitura
-   - Atualizar `Message.status` para DELIVERED/READ
-   - Endpoint `POST /v1/webhooks/inbound/:provider`
-
-4. **Migrations versionadas no git**
-   - Hoje o `.gitignore` ignora `prisma/migrations/` — reconsiderar para produção
-   - Gerar a migration inicial e versioná-la
-
-### 🟡 Prioridade MÉDIA
-
-5. **Job agendado de reset de contadores**
-   - Hoje `resetDailyCounters` só roda no boot em dev
-   - Criar cron real (BullMQ repeatable job) à meia-noite
-
-6. **Processamento de mensagens agendadas**
-   - Job que varre `Message` com status SCHEDULED e `scheduledAt <= now`
-   - Enfileira para envio
-
-7. **Rate limiting por ApiClient**
-   - Usar `@fastify/rate-limit` com o `rateLimit` de cada cliente
-   - Hoje o campo existe no banco mas não é aplicado
-
-8. **Health check dos providers**
-   - Job periódico que checa status de cada número/instância
-   - Marca como desconectado e dispara `PROVIDER_DOWN`
-
-9. **Warm-up automático de números novos**
-   - Lógica que aumenta gradualmente o limite de números em status WARMING
-
-### 🟢 Prioridade BAIXA (melhorias)
-
-10. **Dashboard de monitoramento** (web simples ou Grafana)
-11. **Autenticação JWT para painel admin** (separado da API key dos clientes)
-12. **Testes automatizados** (Vitest — unitários nos providers e router)
-13. **Suporte a templates** (Cloud API exige templates aprovados para mensagens proativas)
-14. **Métricas Prometheus** (`/metrics`)
-15. **Dockerfile de produção** (multi-stage build)
+### Dívidas técnicas conhecidas (das revisões)
+- Cache curto (Redis) na resolução de tenant para evitar query dupla por request
+- Health check com paralelismo limitado; notificar também em `BANNED`
+- (Opcional) secret/assinatura nos webhooks inbound para evitar spoofing
+- Convergir `/v1/numbers*` → `/v1/instances*` e remover o legado
 
 ---
 

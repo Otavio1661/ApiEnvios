@@ -1,0 +1,55 @@
+<div class="page-head">
+  <div>
+    <h1>Instâncias</h1>
+    <p class="muted">Conta: <strong><%= it.account.name %></strong></p>
+  </div>
+  <form method="POST" action="/admin/instances" class="add-form" x-data="{ open: false }">
+    <button type="button" class="btn btn-primary" @click="open = !open">+ Adicionar instância</button>
+    <div class="add-fields" x-show="open" x-cloak>
+      <input type="text" name="name" placeholder="Nome (ex: Vendas)" />
+      <select name="provider">
+        <option value="WAHA">WAHA</option>
+        <option value="EVOLUTION">Evolution</option>
+        <option value="CLOUD_API">Cloud API</option>
+      </select>
+      <button type="submit" class="btn btn-primary">Criar</button>
+    </div>
+  </form>
+</div>
+
+<% if (it.pageError) { %>
+  <div class="alert alert-error"><%= it.pageError %></div>
+<% } %>
+
+<div class="card api-key-card">
+  <span class="muted">API key da conta</span>
+  <code class="token-cell"><%= it.account.apiKey %></code>
+</div>
+
+<div class="card">
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>Status de autenticação</th>
+        <th>API URL</th>
+        <th>ID da instância</th>
+        <th>Token</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (it.instances.length === 0) { %>
+        <tr><td colspan="5" class="muted center">Nenhuma instância ainda. Crie a primeira acima.</td></tr>
+      <% } %>
+      <% it.instances.forEach(function(inst){ %>
+        <tr>
+          <td><span class="badge badge-<%= inst.connectionState %>"><%= inst.connectionState %></span></td>
+          <td><code><%= inst.apiUrl %></code></td>
+          <td><code><%= inst.id %></code></td>
+          <td><code class="token-cell"><%= inst.token %></code></td>
+          <td><a class="btn btn-ghost" href="/admin/instances/<%= inst.id %>">Abrir</a></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

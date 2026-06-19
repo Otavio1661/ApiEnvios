@@ -1,0 +1,128 @@
+<div class="page-head">
+  <div>
+    <a href="/admin" class="muted">&larr; Voltar</a>
+    <h1><%= it.instance.name || 'Instância' %></h1>
+    <p class="muted">Provider: <strong><%= it.instance.provider %></strong> · ID: <code><%= it.instance.id %></code></p>
+  </div>
+</div>
+
+<div class="grid-2"
+     x-data="instancePanel('<%= it.instance.id %>', '<%= it.instance.connectionState %>')"
+     x-init="startPolling()">
+
+  <div class="card">
+    <h2>Conexão</h2>
+    <p>Status: <span class="badge" :class="'badge-' + state" x-text="state"></span></p>
+
+    <button class="btn btn-primary" @click="connect()" :disabled="loading">
+      <span x-show="!loading">Conectar</span>
+      <span x-show="loading" x-cloak>Conectando...</span>
+    </button>
+
+    <div class="qr-area" x-show="qr" x-cloak>
+      <p class="muted">Escaneie o QR no WhatsApp:</p>
+      <img :src="qr" alt="QR Code" class="qr-img" />
+    </div>
+
+    <div class="alert alert-error" x-show="error" x-cloak x-text="error"></div>
+  </div>
+
+  <div class="card">
+    <h2>Enviar mensagem de teste</h2>
+    <% if (it.sent) { %>
+      <div class="alert alert-ok">Mensagem enfileirada com sucesso.</div>
+    <% } %>
+    <% if (it.sendError) { %>
+      <div class="alert alert-error"><%= it.sendError %></div>
+    <% } %>
+    <form method="POST" action="/admin/instances/<%= it.instance.id %>/test" class="form">
+      <label class="field">
+        <span>Destino (com DDI)</span>
+        <input type="text" name="to" placeholder="5544999990000" required />
+      </label>
+      <label class="field">
+        <span>Mensagem</span>
+        <textarea name="body" rows="3" required></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">Enviar</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Últimas mensagens</h2>
+  <table class="instances-table">
+    <thead>
+      <tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Criada em</th></tr>
+    </thead>
+    <tbody>
+      <% if (it.messages.length === 0) { %>
+        <tr><td colspan="4" class="muted center">Nenhuma mensagem ainda.</td></tr>
+      <% } %>
+      <% it.messages.forEach(function(m){ %>
+        <tr>
+          <td><%= m.toPhone %></td>
+          <td><%= m.type %></td>
+          <td><span class="badge badge-msg"><%= m.status %></span></td>
+          <td><%= new Date(m.createdAt).toLocaleString('pt-BR') %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  function instancePanel(id, initialState) {
+    return {
+      id,
+      state: initialState,
+      qr: null,
+      loading: false,
+      error: '',
+      _statusTimer: null,
+      _qrTimer: null,
+      async connect() {
+        this.loading = true
+        this.error = ''
+        try {
+          const res = await fetch('/admin/instances/' + this.id + '/connect', { method: 'POST' })
+          const data = await res.json()
+          if (!res.ok) {
+            this.error = data.error || 'Falha ao conectar no provider'
+          } else {
+            if (data.qrCode) this.qr = data.qrCode.startsWith('data:') ? data.qrCode : 'data:image/png;base64,' + data.qrCode
+            if (data.connectionState) this.state = data.connectionState
+          }
+        } catch (e) {
+          this.error = 'Erro de rede ao conectar'
+        } finally {
+          this.loading = false
+        }
+      },
+      async refreshStatus() {
+        try {
+          const res = await fetch('/admin/instances/' + this.id + '/status')
+          if (res.ok) {
+            const data = await res.json()
+            if (data.connectionState) this.state = data.connectionState
+            if (this.state === 'CONNECTED') this.qr = null
+          }
+        } catch (e) { /* silencioso */ }
+      },
+      async refreshQr() {
+        if (this.state !== 'QR_PENDING') return
+        try {
+          const res = await fetch('/admin/instances/' + this.id + '/qr')
+          if (res.ok) {
+            const data = await res.json()
+            if (data.qrCode) this.qr = data.qrCode.startsWith('data:') ? data.qrCode : 'data:image/png;base64,' + data.qrCode
+          }
+        } catch (e) { /* silencioso */ }
+      },
+      startPolling() {
+        this._statusTimer = setInterval(() => this.refreshStatus(), 3000)
+        this._qrTimer = setInterval(() => this.refreshQr(), 5000)
+      },
+    }
+  }
+</script>

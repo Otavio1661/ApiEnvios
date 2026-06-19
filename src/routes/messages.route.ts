@@ -1,7 +1,7 @@
 // src/routes/messages.route.ts
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { authAccount } from '../middlewares/auth.middleware'
+import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { enqueueSend } from '../queues/send-message.queue'
 import { normalizePhone } from '../utils/helpers'
@@ -20,7 +20,7 @@ const sendSchema = z.object({
 export async function messagesRoutes(app: FastifyInstance) {
   // ── POST /messages — Enviar mensagem ─────────────────────────
   app.post('/messages', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const body = sendSchema.safeParse(request.body)
       if (!body.success) {
@@ -87,7 +87,7 @@ export async function messagesRoutes(app: FastifyInstance) {
 
   // ── GET /messages/:id — Status de uma mensagem (escopado) ────
   app.get<{ Params: { id: string } }>('/messages/:id', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const message = await prisma.message.findFirst({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },
@@ -101,7 +101,7 @@ export async function messagesRoutes(app: FastifyInstance) {
 
   // ── GET /messages — Lista mensagens do tenant com filtros ────
   app.get('/messages', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const query = request.query as { status?: string; page?: string; limit?: string }
       const page = Math.max(1, Number(query.page ?? 1))

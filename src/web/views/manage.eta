@@ -1,0 +1,172 @@
+<div class="page-head">
+  <div>
+    <a href="/admin" class="muted">&larr; Voltar</a>
+    <h1>Gestão</h1>
+    <p class="muted">Crie e administre contas (tenants) e usuários da plataforma.</p>
+  </div>
+</div>
+
+<% if (it.ok) { %>
+  <div class="alert alert-ok"><%= it.ok %></div>
+<% } %>
+<% if (it.err) { %>
+  <div class="alert alert-error"><%= it.err %></div>
+<% } %>
+
+<div class="grid-2">
+  <!-- ── Criar conta (tenant) ─────────────────────────────── -->
+  <div class="card">
+    <h2>Nova conta</h2>
+    <form method="POST" action="/admin/manage/clients" class="form">
+      <label class="field">
+        <span>Nome da conta *</span>
+        <input type="text" name="name" placeholder="Ex: Loja Centro" required />
+      </label>
+      <label class="field">
+        <span>Tipo</span>
+        <select name="role">
+          <option value="CLIENT">CLIENT</option>
+          <option value="ADMIN">ADMIN</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Limite de envios (rate limit)</span>
+        <input type="number" name="rateLimit" value="100" min="1" />
+      </label>
+      <label class="field-check">
+        <input type="checkbox" name="fallbackEnabled" />
+        <span>Habilitar fallback entre providers</span>
+      </label>
+
+      <p class="muted section-label">Owner inicial (opcional)</p>
+      <label class="field">
+        <span>E-mail do owner</span>
+        <input type="email" name="ownerEmail" placeholder="owner@empresa.com" />
+      </label>
+      <label class="field">
+        <span>Senha do owner (mín. 8)</span>
+        <input type="password" name="ownerPassword" minlength="8" autocomplete="new-password" />
+      </label>
+      <label class="field">
+        <span>Nome do owner</span>
+        <input type="text" name="ownerName" placeholder="Nome completo" />
+      </label>
+
+      <button type="submit" class="btn btn-primary">Criar conta</button>
+    </form>
+  </div>
+
+  <!-- ── Criar usuário ────────────────────────────────────── -->
+  <div class="card">
+    <h2>Novo usuário</h2>
+    <% if (it.clients.length === 0) { %>
+      <p class="muted">Crie uma conta antes de adicionar usuários.</p>
+    <% } else { %>
+    <form method="POST" action="/admin/manage/users" class="form">
+      <label class="field">
+        <span>Conta *</span>
+        <select name="apiClientId" required>
+          <% it.clients.forEach(function(c){ %>
+            <option value="<%= c.id %>"><%= c.name %> (<%= c.role %>)</option>
+          <% }) %>
+        </select>
+      </label>
+      <label class="field">
+        <span>E-mail *</span>
+        <input type="email" name="email" placeholder="usuario@empresa.com" required />
+      </label>
+      <label class="field">
+        <span>Senha (mín. 8) *</span>
+        <input type="password" name="password" minlength="8" required autocomplete="new-password" />
+      </label>
+      <label class="field">
+        <span>Nome</span>
+        <input type="text" name="name" placeholder="Nome completo" />
+      </label>
+      <label class="field">
+        <span>Papel</span>
+        <select name="role">
+          <option value="OWNER">OWNER</option>
+          <option value="MEMBER">MEMBER</option>
+        </select>
+      </label>
+      <button type="submit" class="btn btn-primary">Criar usuário</button>
+    </form>
+    <% } %>
+  </div>
+</div>
+
+<!-- ── Tabela de contas ───────────────────────────────────── -->
+<div class="card">
+  <h2>Contas (<%= it.clients.length %>)</h2>
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>Nome</th>
+        <th>Tipo</th>
+        <th>Ativa</th>
+        <th>Instâncias</th>
+        <th>Usuários</th>
+        <th>Enviadas</th>
+        <th>ID</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (it.clients.length === 0) { %>
+        <tr><td colspan="7" class="muted center">Nenhuma conta ainda.</td></tr>
+      <% } %>
+      <% it.clients.forEach(function(c){ %>
+        <tr>
+          <td><strong><%= c.name %></strong></td>
+          <td><span class="badge badge-msg"><%= c.role %></span></td>
+          <td><%= c.active ? 'Sim' : 'Não' %></td>
+          <td><%= c._count.instances %></td>
+          <td><%= c._count.users %></td>
+          <td><%= c.totalSent %></td>
+          <td><code><%= c.id %></code></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Tabela de usuários ─────────────────────────────────── -->
+<div class="card">
+  <h2>Usuários (<%= it.users.length %>)</h2>
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>E-mail</th>
+        <th>Nome</th>
+        <th>Papel</th>
+        <th>Conta</th>
+        <th>Criado em</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (it.users.length === 0) { %>
+        <tr><td colspan="6" class="muted center">Nenhum usuário ainda.</td></tr>
+      <% } %>
+      <% it.users.forEach(function(u){ %>
+        <tr>
+          <td><%= u.email %></td>
+          <td><%= u.name || '—' %></td>
+          <td><span class="badge badge-msg"><%= u.role %></span></td>
+          <td><%= it.clientNames[u.apiClientId] || u.apiClientId %></td>
+          <td><%= new Date(u.createdAt).toLocaleString('pt-BR') %></td>
+          <td>
+            <% if (u.id === it.user.id) { %>
+              <span class="muted">você</span>
+            <% } else { %>
+              <form method="POST" action="/admin/manage/users/<%= u.id %>/delete" class="inline"
+                    onsubmit="return confirm('Remover o usuário <%= u.email %>?')">
+                <button type="submit" class="btn btn-ghost btn-danger">Remover</button>
+              </form>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

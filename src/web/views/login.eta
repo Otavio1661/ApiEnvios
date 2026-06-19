@@ -1,0 +1,22 @@
+<div class="login-wrap">
+  <div class="card login-card">
+    <h1 class="login-title">ApiEnvios</h1>
+    <p class="muted">Painel de gerenciamento de instâncias</p>
+
+    <% if (it.error) { %>
+      <div class="alert alert-error"><%= it.error %></div>
+    <% } %>
+
+    <form method="POST" action="/admin/login" class="form">
+      <label class="field">
+        <span>E-mail</span>
+        <input type="email" name="email" required autofocus value="<%= it.email || '' %>" />
+      </label>
+      <label class="field">
+        <span>Senha</span>
+        <input type="password" name="password" required />
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+    </form>
+  </div>
+</div>

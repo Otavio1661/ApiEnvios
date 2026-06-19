@@ -83,8 +83,14 @@ export async function authInstance(
 // authAccount/authInstance/requireAdmin. Rotas públicas são ignoradas.
 export async function resolveTenantContext(request: FastifyRequest) {
   if (request.apiClient) return
-  // Ignora rotas públicas (health e callbacks inbound dos providers).
-  if (request.url === '/health' || request.url.includes('/webhooks/inbound/')) return
+  // Ignora rotas públicas (health e callbacks inbound dos providers) e o painel web
+  // (autenticado por cookie httpOnly, resolvido no preHandler requirePanelAuth).
+  if (
+    request.url === '/health' ||
+    request.url.includes('/webhooks/inbound/') ||
+    request.url.startsWith('/admin')
+  )
+    return
 
   try {
     const apiKey =
@@ -114,6 +120,60 @@ export async function resolveTenantContext(request: FastifyRequest) {
   } catch {
     // Resolução é best-effort; falha aqui não bloqueia o request.
   }
+}
+
+// ── Auth por JWT (login humano) ───────────────────────────────
+// Valida o JWT (header Authorization: Bearer), carrega o ApiClient da conta
+// e o User do payload, e anexa request.apiClient (REUSA o escopo por tenant)
+// + request.authUser. 401 se inválido/expirado ou conta inativa.
+export async function authJwt(request: FastifyRequest, reply: FastifyReply) {
+  let payload: { userId: string; apiClientId: string; accountRole: string }
+  try {
+    payload = await request.jwtVerify()
+  } catch {
+    return reply.status(401).send({ error: 'Token inválido ou expirado' })
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.userId },
+    include: { apiClient: true },
+  })
+
+  if (!user || !user.apiClient.active) {
+    return reply.status(401).send({ error: 'Usuário ou conta inválidos/inativos' })
+  }
+
+  const { apiClient, passwordHash, ...userData } = user
+  request.apiClient = apiClient
+  request.authUser = {
+    id: userData.id,
+    email: userData.email,
+    name: userData.name,
+    role: userData.role,
+  }
+}
+
+// ── Auth combinado: API key OU JWT (endpoints de gestão) ──────
+// Mantém 100% de compatibilidade com a API key de conta. Estratégia:
+// 1) Se houver header `x-api-key`, usa authAccount (API key explícita).
+// 2) Caso contrário, se houver `Authorization: Bearer <valor>`, decide pelo
+//    formato do valor: um JWT tem 3 segmentos separados por ponto → authJwt;
+//    qualquer outro valor é tratado como API key de conta → authAccount.
+// 3) Sem nenhum dos dois → 401 (delegado ao authAccount, que já responde 401).
+export async function authManage(request: FastifyRequest, reply: FastifyReply) {
+  const apiKeyHeader = request.headers['x-api-key'] as string | undefined
+  if (apiKeyHeader) {
+    return authAccount(request, reply)
+  }
+
+  const bearer = request.headers.authorization?.replace('Bearer ', '')
+  // Heurística: 3 partes separadas por ponto ⇒ JWT (header.payload.signature).
+  if (bearer && bearer.split('.').length === 3) {
+    return authJwt(request, reply)
+  }
+
+  // Sem JWT detectável: trata como API key de conta (mantém compatibilidade).
+  return authAccount(request, reply)
 }
 
 // ── Exige papel ADMIN (usar depois de authAccount) ────────────

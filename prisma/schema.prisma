@@ -175,8 +175,30 @@ model ApiClient {
   instances   Instance[]
   messages    Message[]
   webhooks    Webhook[]
+  users       User[]
 
   @@index([apiKey])
+}
+
+// ─────────────────────────────────────────────
+// USUÁRIOS HUMANOS (login JWT — criados SOMENTE pelo admin)
+// ─────────────────────────────────────────────
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String?
+  role          UserRole @default(OWNER)   // papel DENTRO da conta
+  emailVerified Boolean  @default(false)
+
+  // Conta (tenant) à qual o usuário pertence
+  apiClientId   String
+  apiClient     ApiClient @relation(fields: [apiClientId], references: [id])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([apiClientId])
 }
 
 // ─────────────────────────────────────────────
@@ -223,6 +245,11 @@ enum NumberStatus {
 enum ClientRole {
   ADMIN       // gerencia contas e instâncias de todos
   CLIENT      // tenant comum
+}
+
+enum UserRole {
+  OWNER       // dono da conta
+  MEMBER      // membro convidado da conta
 }
 
 enum InstanceConnState {

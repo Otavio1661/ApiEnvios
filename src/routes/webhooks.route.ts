@@ -1,7 +1,7 @@
 // src/routes/webhooks.route.ts
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { authAccount } from '../middlewares/auth.middleware'
+import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { mapInboundStatus, normalizeProvider, isStatusAdvance } from '../services/inbound-status.service'
 import { dispatchWebhook } from '../services/notification.service'
@@ -22,7 +22,7 @@ const webhookSchema = z.object({
 export async function webhooksRoutes(app: FastifyInstance) {
   // ── GET /webhooks — Lista webhooks do tenant ──────────────────
   app.get('/webhooks', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const webhooks = await prisma.webhook.findMany({
         where: { apiClientId: request.apiClient!.id },
@@ -33,7 +33,7 @@ export async function webhooksRoutes(app: FastifyInstance) {
 
   // ── POST /webhooks — Cadastra webhook do tenant ───────────────
   app.post('/webhooks', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const body = webhookSchema.safeParse(request.body)
       if (!body.success) return reply.status(400).send({ error: body.error.flatten() })
@@ -46,7 +46,7 @@ export async function webhooksRoutes(app: FastifyInstance) {
 
   // ── DELETE /webhooks/:id — Remove webhook do tenant ───────────
   app.delete<{ Params: { id: string } }>('/webhooks/:id', {
-    preHandler: authAccount,
+    preHandler: authManage,
     handler: async (request, reply) => {
       const result = await prisma.webhook.deleteMany({
         where: { id: request.params.id, apiClientId: request.apiClient!.id },

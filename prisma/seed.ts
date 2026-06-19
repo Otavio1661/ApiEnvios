@@ -1,5 +1,6 @@
 // prisma/seed.ts
 import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
@@ -33,6 +34,20 @@ async function main() {
     },
   })
   console.log(`✅ ApiClient criado: ${devClient.name} (key: ${devClient.apiKey})`)
+
+  // Usuário OWNER do cliente dev (login JWT) — senha: dev123456
+  const ownerUser = await prisma.user.upsert({
+    where: { email: 'owner@dev.local' },
+    update: { apiClientId: devClient.id, role: 'OWNER' },
+    create: {
+      email: 'owner@dev.local',
+      passwordHash: await bcrypt.hash('dev123456', 10),
+      name: 'Owner Dev',
+      role: 'OWNER',
+      apiClientId: devClient.id,
+    },
+  })
+  console.log(`✅ Usuário OWNER criado: ${ownerUser.email} (senha: dev123456)`)
 
   // Instância de exemplo (Evolution API) — vinculada ao cliente dev
   const instance1 = await prisma.instance.upsert({

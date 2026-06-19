@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= it.title || 'ApiEnvios' %></title>
+  <link rel="stylesheet" href="/admin/assets/styles.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+  <% if (it.user) { %>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="/admin" class="brand">ApiEnvios</a>
+      <nav class="topnav">
+        <% if (it.isAdmin) { %>
+        <a href="/admin/manage" class="btn btn-ghost">Gestão</a>
+        <% } %>
+        <span class="user-email"><%= it.user.email %></span>
+        <form method="POST" action="/admin/logout" class="inline">
+          <button type="submit" class="btn btn-ghost">Sair</button>
+        </form>
+      </nav>
+    </div>
+  </header>
+  <% } %>
+  <main class="container">
+    <%~ it.body %>
+  </main>
+</body>
+</html>

@@ -17,6 +17,9 @@ export const config = {
     publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000',
     // Teto de requisições/minuto para clientes sem rateLimit próprio definido
     defaultRateLimit: Number(process.env.DEFAULT_RATE_LIMIT ?? 100),
+    // JWT para login humano (usuários gerenciam as próprias instâncias)
+    jwtSecret: process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
   },
 
   db: {
@@ -61,3 +64,15 @@ export const config = {
     alertEmail: process.env.ALERT_EMAIL ?? '',
   },
 } as const
+
+// Guard de produção: nunca subir com segredos no valor dev (risco de forja de token/auth).
+if (!config.app.isDev) {
+  const insecure: string[] = []
+  if (config.app.jwtSecret === 'dev-jwt-secret-change-me') insecure.push('JWT_SECRET')
+  if (config.app.apiSecret === 'dev-secret-change-me') insecure.push('API_SECRET')
+  if (insecure.length > 0) {
+    throw new Error(
+      `Segredos inseguros em produção (defina no ambiente): ${insecure.join(', ')}`,
+    )
+  }
+}
