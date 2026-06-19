@@ -63,6 +63,17 @@ export const config = {
     banWebhookUrl: process.env.BAN_WEBHOOK_URL ?? '',
     alertEmail: process.env.ALERT_EMAIL ?? '',
   },
+
+  // Admin inicial do painel, provisionado pelo seed a partir do ambiente.
+  // Sem valores default para email/senha: vazio = criação do admin desativada
+  // (o seed roda normalmente, apenas pula a etapa). NUNCA hardcode credenciais.
+  adminSeed: {
+    email: process.env.ADMIN_SEED_EMAIL ?? '',
+    password: process.env.ADMIN_SEED_PASSWORD ?? '',
+    name: process.env.ADMIN_SEED_NAME ?? 'Administrador',
+    // Habilitado apenas quando email e senha estão ambos preenchidos.
+    enabled: Boolean(process.env.ADMIN_SEED_EMAIL && process.env.ADMIN_SEED_PASSWORD),
+  },
 } as const
 
 // Guard de produção: nunca subir com segredos no valor dev (risco de forja de token/auth).

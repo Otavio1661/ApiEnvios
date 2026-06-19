@@ -1,6 +1,8 @@
 // prisma/seed.ts
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+import { config } from '../src/config'
+import { hashPassword } from '../src/utils/password'
 
 const prisma = new PrismaClient()
 
@@ -84,6 +86,33 @@ async function main() {
     },
   })
   console.log(`✅ Instância criada: ${instance2.phone} (${instance2.provider}) token: ${instance2.token}`)
+
+  // ── Admin inicial do painel (configurável por ambiente) ──────────
+  // Só executa quando ADMIN_SEED_EMAIL e ADMIN_SEED_PASSWORD estão ambos
+  // preenchidos. Vazio/ausente = pula sem erro. Idempotente (upsert por email).
+  if (config.adminSeed.enabled) {
+    const adminUser = await prisma.user.upsert({
+      where: { email: config.adminSeed.email },
+      update: {
+        passwordHash: await hashPassword(config.adminSeed.password),
+        name: config.adminSeed.name,
+        role: 'OWNER',
+        apiClientId: adminClient.id,
+      },
+      create: {
+        email: config.adminSeed.email,
+        passwordHash: await hashPassword(config.adminSeed.password),
+        name: config.adminSeed.name,
+        role: 'OWNER',
+        apiClientId: adminClient.id,
+      },
+    })
+    console.log(
+      `✅ Admin do painel criado/atualizado: ${adminUser.email} (ApiClient ADMIN: ${adminClient.name})`,
+    )
+  } else {
+    console.log('ℹ️  Admin seed desativado (ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD não definidos).')
+  }
 
   console.log('\n🎉 Seed concluído!')
   console.log('\nPara testar a API:')
