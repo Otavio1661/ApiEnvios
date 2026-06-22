@@ -43,6 +43,10 @@ import {
 // Nome do cookie de sessão do painel (mesmo JWT da API).
 const COOKIE_NAME = 'token'
 
+// Versão dos assets (cache-busting). Definida no boot: cada restart/deploy gera
+// uma nova versão, forçando o navegador a rebaixar o CSS em vez de servir o cache.
+const ASSET_VERSION = Date.now().toString(36)
+
 // Opções do cookie httpOnly: Secure só em produção; SameSite=Lax; Path raiz.
 function cookieOptions() {
   return {
@@ -62,7 +66,7 @@ async function renderPage(
   layoutData: Record<string, unknown> = {},
 ) {
   const body = await app.view(view, data)
-  const html = await app.view('layout', { body, ...layoutData })
+  const html = await app.view('layout', { body, assetVersion: ASSET_VERSION, ...layoutData })
   return reply.type('text/html').send(html)
 }
 
