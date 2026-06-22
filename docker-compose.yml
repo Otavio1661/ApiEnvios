@@ -108,6 +108,7 @@ services:
       NODE_ENV: development
       PORT: 3002
       PUBLIC_BASE_URL: http://app:3002
+      PUBLIC_API_URL: https://dev-api.r4dev.com.br
       API_SECRET: apienvios-dev-secret-2026-xK9mP3qR
       JWT_SECRET: apienvios-dev-jwt-secret-2026-zQ7wL2nT
       JWT_EXPIRES_IN: 7d

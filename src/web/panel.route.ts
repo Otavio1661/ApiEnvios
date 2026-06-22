@@ -267,6 +267,29 @@ export async function panelRoutes(app: FastifyInstance) {
     },
   )
 
+  // ── GET /docs — Documentação da API (exemplos JS/PHP/cURL) ─────
+  app.get('/docs', { preHandler: requirePanelAuth }, async (request, reply) => {
+    // Usa uma instância real da conta (se houver) para os exemplos ficarem
+    // copy-paste prontos com id/slug/token de verdade; senão, placeholders.
+    const list = await listInstances(request.apiClient!.id)
+    const first = list[0]
+    const sample = first
+      ? { id: first.id, slug: first.slug, token: first.token }
+      : { id: 'ID_DA_INSTANCIA', slug: 'slug-da-instancia', token: 'TOKEN_DA_INSTANCIA' }
+    return renderPage(
+      app,
+      reply,
+      'docs',
+      {
+        title: 'Documentação — ApiEnvios',
+        apiBase: config.app.apiPublicUrl,
+        apiKey: request.apiClient!.apiKey,
+        sample,
+      },
+      { user: request.authUser, isAdmin: isSuperAdmin(request), activeNav: 'docs' },
+    )
+  })
+
   // ── POST /instances — Cria instância (reusa o service) ─────
   app.post('/instances', { preHandler: requirePanelAuth }, async (request, reply) => {
     const raw = (request.body ?? {}) as Record<string, unknown>
@@ -379,6 +402,7 @@ export async function panelRoutes(app: FastifyInstance) {
           messages,
           numbers,
           sentTodayTotal,
+          apiBase: config.app.apiPublicUrl,
           isSuperAdmin: isSuperAdmin(request),
           sent: request.query.sent === '1',
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,

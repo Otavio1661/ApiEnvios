@@ -137,6 +137,21 @@
 </div>
 
 <div class="card">
+  <div class="page-head" style="margin-bottom:8px">
+    <h2 style="margin:0">Como enviar por esta instância</h2>
+    <a href="/admin/docs" class="back-link">Ver documentação completa →</a>
+  </div>
+  <p class="muted">Use o token desta instância no header <code>Token</code>. O roteador escolhe o melhor número conectado do pool.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.instance.id %>/messages/chat" \
+  -H "Token: <%= it.instance.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","body":"Olá!"}'</code></pre>
+  </div>
+</div>
+
+<div class="card">
   <h2>Últimas mensagens</h2>
   <table class="instances-table">
     <thead>

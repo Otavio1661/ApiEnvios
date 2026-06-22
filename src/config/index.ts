@@ -15,6 +15,9 @@ export const config = {
     isDev: (process.env.NODE_ENV ?? 'development') === 'development',
     // URL base pública usada para montar apiUrl das instâncias e URLs de webhook
     publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000',
+    // URL pública da API (externa) — usada só para exibir exemplos na documentação.
+    // Em dev/Docker o publicBaseUrl é interno (app:3002); aqui é o domínio externo.
+    apiPublicUrl: process.env.PUBLIC_API_URL ?? process.env.PUBLIC_BASE_URL ?? 'http://localhost:3002',
     // Teto de requisições/minuto para clientes sem rateLimit próprio definido
     defaultRateLimit: Number(process.env.DEFAULT_RATE_LIMIT ?? 100),
     // JWT para login humano (usuários gerenciam as próprias instâncias)

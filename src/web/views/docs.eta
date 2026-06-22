@@ -1,0 +1,136 @@
+<div class="page-head">
+  <div>
+    <h1>Documentação da API</h1>
+    <p class="subtitle">Exemplos prontos para enviar mensagens pelas suas instâncias. Os trechos abaixo já usam os dados da sua conta.</p>
+  </div>
+</div>
+
+<div class="callout">
+  <span class="callout-icon">💡</span>
+  <div>
+    Cada <strong>instância</strong> é um pool de números do WhatsApp. Você envia para a instância e o roteador escolhe automaticamente o melhor número conectado (rodízio anti-ban). Há dois modos de autenticação — escolha um.
+  </div>
+</div>
+
+<!-- Autenticação -->
+<div class="card">
+  <h2>Autenticação</h2>
+  <table class="instances-table">
+    <thead><tr><th>Modo</th><th>Header</th><th>Quando usar</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Token de instância</strong></td>
+        <td><code>Token: &lt;token&gt;</code></td>
+        <td>Recomendado para apps cliente. Envia direto por uma instância específica.</td>
+      </tr>
+      <tr>
+        <td><strong>API key da conta</strong></td>
+        <td><code>x-api-key: &lt;chave&gt;</code></td>
+        <td>Gestão/multi-instância. Permite escolher a instância no corpo (<code>instanceId</code>).</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="muted" style="margin-top:12px">
+    Base da API: <code><%= it.apiBase %></code> ·
+    Sua API key: <code><%= it.apiKey %></code> ·
+    Token da instância de exemplo: <code><%= it.sample.token %></code>
+  </p>
+</div>
+
+<!-- Enviar texto (abas de linguagem) -->
+<div class="card" x-data="{ t: 'curl' }">
+  <h2>Enviar mensagem de texto</h2>
+  <p class="muted"><code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat</code> → resposta <code>202 { id, status: "QUEUED" }</code></p>
+
+  <div class="tabs">
+    <button type="button" class="tab" :class="t==='curl' && 'active'" @click="t='curl'">cURL</button>
+    <button type="button" class="tab" :class="t==='js' && 'active'" @click="t='js'">JavaScript</button>
+    <button type="button" class="tab" :class="t==='php' && 'active'" @click="t='php'">PHP</button>
+  </div>
+
+  <div x-show="t==='curl'" class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat" \
+  -H "Token: <%= it.sample.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","body":"Olá! Mensagem de teste."}'</code></pre>
+  </div>
+
+  <div x-show="t==='js'" x-cloak class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>const res = await fetch("<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat", {
+  method: "POST",
+  headers: {
+    "Token": "<%= it.sample.token %>",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ to: "5544999990000", body: "Olá! Mensagem de teste." }),
+});
+const data = await res.json();
+console.log(data); // { id, status: "QUEUED" }</code></pre>
+  </div>
+
+  <div x-show="t==='php'" x-cloak class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>&lt;?php
+$ch = curl_init("<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat");
+curl_setopt_array($ch, [
+  CURLOPT_RETURNTRANSFER =&gt; true,
+  CURLOPT_POST =&gt; true,
+  CURLOPT_HTTPHEADER =&gt; [
+    "Token: <%= it.sample.token %>",
+    "Content-Type: application/json",
+  ],
+  CURLOPT_POSTFIELDS =&gt; json_encode([
+    "to" =&gt; "5544999990000",
+    "body" =&gt; "Olá! Mensagem de teste.",
+  ]),
+]);
+$response = curl_exec($ch);
+curl_close($ch);
+echo $response; // {"id":"...","status":"QUEUED"}</code></pre>
+  </div>
+</div>
+
+<!-- Enviar mídia -->
+<div class="card">
+  <h2>Enviar mídia (imagem, vídeo, áudio, documento)</h2>
+  <p class="muted"><code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media</code></p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media" \
+  -H "Token: <%= it.sample.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","type":"IMAGE","mediaUrl":"https://exemplo.com/foto.jpg","caption":"Legenda"}'</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px">Tipos aceitos: <code>IMAGE</code>, <code>VIDEO</code>, <code>AUDIO</code>, <code>DOCUMENT</code>.</p>
+</div>
+
+<!-- Alternativa: API key da conta -->
+<div class="card">
+  <h2>Alternativa — enviar pela API key da conta</h2>
+  <p class="muted"><code>POST <%= it.apiBase %>/v1/messages</code> · escolha a instância no corpo (<code>instanceId</code>) ou omita para usar a preferida.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/messages" \
+  -H "x-api-key: <%= it.apiKey %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","type":"TEXT","text":"Olá!","instanceId":"<%= it.sample.id %>"}'</code></pre>
+  </div>
+</div>
+
+<!-- Consultar status -->
+<div class="card">
+  <h2>Consultar status de uma mensagem</h2>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl "<%= it.apiBase %>/v1/messages/MENSAGEM_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px">Estados: <code>QUEUED</code> → <code>SENDING</code> → <code>SENT</code> → <code>DELIVERED</code> → <code>READ</code> (ou <code>FAILED</code>).</p>
+</div>
+
+<!-- Insomnia / Postman -->
+<div class="card">
+  <h2>Insomnia / Postman</h2>
+  <p class="muted">Copie qualquer exemplo <strong>cURL</strong> acima e cole no Insomnia (<em>Import → From Clipboard</em>) ou Postman (<em>Import → Raw text</em>). A ferramenta monta a requisição automaticamente — método, URL, headers e corpo.</p>
+</div>
