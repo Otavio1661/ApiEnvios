@@ -253,7 +253,7 @@ export async function panelRoutes(app: FastifyInstance) {
         'dashboard',
         {
           title: 'Instâncias — ApiEnvios',
-          account: { name: account.name, apiKey: account.apiKey },
+          account: { name: account.name, apiKey: account.apiKey, maxInstances: account.maxInstances },
           instances,
           isSuperAdmin: isSuperAdmin(request),
           pageError: request.query.err ? decodeURIComponent(request.query.err) : null,

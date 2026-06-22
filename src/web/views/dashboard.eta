@@ -1,10 +1,11 @@
+<% const atLimit = !it.isSuperAdmin && it.instances.length >= it.account.maxInstances; %>
 <div class="page-head">
   <div>
     <h1>Instâncias</h1>
-    <p class="muted">Conta: <strong><%= it.account.name %></strong></p>
+    <p class="subtitle">Conta: <strong><%= it.account.name %></strong> · cada instância é um pool de números do WhatsApp.</p>
   </div>
   <form method="POST" action="/admin/instances" class="add-form" x-data="{ open: false }">
-    <button type="button" class="btn btn-primary" @click="open = !open">+ Adicionar instância</button>
+    <button type="button" class="btn btn-primary" @click="open = !open" <%= atLimit ? 'disabled title="Limite de instâncias da conta atingido"' : '' %>>+ Adicionar instância</button>
     <div class="add-fields" x-show="open" x-cloak>
       <input type="text" name="name" placeholder="Nome (ex: Vendas-SP)" />
       <input type="text" name="slug" placeholder="Slug (ex: vendas-sp)" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" />
@@ -22,9 +23,25 @@
   <div class="alert alert-error"><%= it.pageError %></div>
 <% } %>
 
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-num"><%= it.instances.length %><% if (!it.isSuperAdmin) { %> / <%= it.account.maxInstances %><% } %></div>
+    <div class="stat-label">Instâncias<% if (!it.isSuperAdmin) { %> (uso / quota)<% } else { %> (super admin: ilimitado)<% } %></div>
+  </div>
+  <div class="stat">
+    <div class="stat-num"><%= it.instances.filter(function(i){ return i.connectionState === 'CONNECTED' }).length %></div>
+    <div class="stat-label">Conectadas</div>
+  </div>
+</div>
+
+<% if (atLimit) { %>
+  <div class="alert alert-error">Você atingiu o limite de <strong><%= it.account.maxInstances %></strong> instância(s) desta conta. Para criar mais, peça ao super admin para aumentar a quota.</div>
+<% } %>
+
 <div class="card api-key-card">
   <span class="muted">API key da conta</span>
   <code class="token-cell"><%= it.account.apiKey %></code>
+  <span class="muted" style="margin-left:auto">Use no header <code>x-api-key</code> das chamadas à API.</span>
 </div>
 
 <div class="card">
