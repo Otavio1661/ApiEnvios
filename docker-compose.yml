@@ -1,17 +1,24 @@
 version: "3.9"
 
+# Rede isolada para não interferir com o projeto casamento (casamento_default / r4net)
+networks:
+  apienvios_net:
+    driver: bridge
+
 services:
-  # ── Banco de dados ──────────────────────────────────────────
+  # ── Banco de dados dedicado ─────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: apienvios_postgres
     restart: unless-stopped
+    networks:
+      - apienvios_net
     environment:
       POSTGRES_USER: apienvios
       POSTGRES_PASSWORD: senha123
       POSTGRES_DB: apienvios
     ports:
-      - "5432:5432"
+      - "5433:5432"   # 5432 ocupado pelo r4server (casamento)
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +32,8 @@ services:
     image: redis:7-alpine
     container_name: apienvios_redis
     restart: unless-stopped
+    networks:
+      - apienvios_net
     ports:
       - "6379:6379"
     volumes:
@@ -40,6 +49,8 @@ services:
     image: atendai/evolution-api:latest
     container_name: apienvios_evolution
     restart: unless-stopped
+    networks:
+      - apienvios_net
     ports:
       - "8081:8080"
     environment:
@@ -56,17 +67,20 @@ services:
       QRCODE_LIMIT: 30
       DEL_INSTANCE: "false"
       LOG_LEVEL: ERROR
+      CONFIG_SESSION_PHONE_VERSION: "2.3000.1035194821"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-  # ── Provider 2: WAHA (fallback gratuito) ────────────────────
+  # ── Provider 2: WAHA ────────────────────────────────────────
   waha:
     image: devlikeapro/waha:latest
     container_name: apienvios_waha
     restart: unless-stopped
+    networks:
+      - apienvios_net
     ports:
       - "3078:3000"
     environment:
@@ -86,18 +100,37 @@ services:
       dockerfile: docker/Dockerfile.dev
     container_name: apienvios_app
     restart: unless-stopped
+    networks:
+      - apienvios_net
     ports:
       - "3002:3002"
     environment:
       NODE_ENV: development
       PORT: 3002
+      PUBLIC_BASE_URL: http://app:3002
+      API_SECRET: apienvios-dev-secret-2026-xK9mP3qR
+      JWT_SECRET: apienvios-dev-jwt-secret-2026-zQ7wL2nT
+      JWT_EXPIRES_IN: 7d
+      # Endereços internos Docker (sobrepõem o .env)
       DATABASE_URL: postgresql://apienvios:senha123@postgres:5432/apienvios
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
       EVOLUTION_API_URL: http://evolution_api:8080
       EVOLUTION_API_KEY: evolution-key-dev-123
       WAHA_URL: http://waha:3000
       WAHA_API_KEY: "1c76189c459b4d90972c2fdea52de530"
+      WA_CLOUD_TOKEN: ""
+      WA_CLOUD_PHONE_NUMBER_ID: ""
+      WA_CLOUD_BUSINESS_ACCOUNT_ID: ""
+      BAN_WEBHOOK_URL: ""
+      ALERT_EMAIL: ""
+      SEND_DELAY_MIN: "2000"
+      SEND_DELAY_MAX: "5000"
+      MAX_MESSAGES_PER_NUMBER_DAY: "200"
+      ADMIN_SEED_EMAIL: otavio.silva1661@gmail.com
+      ADMIN_SEED_PASSWORD: admin123
+      ADMIN_SEED_NAME: Otavio Silva
     volumes:
       - .:/app
       - /app/node_modules
@@ -106,8 +139,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    profiles:
-      - full  # use: docker compose --profile full up
 
 volumes:
   postgres_data:

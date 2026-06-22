@@ -93,7 +93,7 @@ ApiClient (tenant)
 
 | # | Item | Prioridade |
 |---|------|------------|
-| 1 | **Evolution não devolve o QR** — `connect` responde `200` `QR_PENDING` mas `qrCode: null`. Bug em `evolution.provider.ts` (QR provavelmente em outro campo/endpoint). **Destrava o uso real do pool.** | 🔴 Alta |
+| 1 | ✅ **RESOLVIDO (2026-06-22)** — Evolution QR. Eram 3 causas: (a) `PUBLIC_BASE_URL` default `localhost:3000` inalcançável do container → `http://app:3002`; (b) ordem do `setWebhook` no connect (antes da sessão existir → 404) → registrar antes E depois do refreshQr + carimbar `qrExpiresAt`; (c) `CONFIG_SESSION_PHONE_VERSION` desatualizado travava o Baileys → `2.3000.1035194821` (versão atual do WhatsApp Web). Validado ponta a ponta: QR em ~3s, sem ECONNREFUSED, WAHA sem regressão, 82 testes verdes. NÃO commitado. | ✅ Feito |
 | 2 | **WAHA Core só aceita sessão `default`** — instância WAHA tentando `inst-<id>` retorna 502 "get WAHA PLUS". Tratar/avisar na UI; múltiplos números → Evolution. | 🟡 Média |
 | 3 | **Raiz `/` → 404 JSON** — adicionar redirect `/` → `/admin`. | 🟢 Baixa |
 | 4 | **Slug: dupla normalização** — slug explícito é re-`slugify()` sem revalidar; pode gravar slug vazio/curto em borda. | 🟢 Baixa |
