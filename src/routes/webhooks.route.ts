@@ -251,4 +251,9 @@ export async function healthRoutes(app: FastifyInstance) {
   app.get('/health', async (_req, reply) => {
     return reply.send({ status: 'ok', timestamp: new Date().toISOString() })
   })
+
+  // Raiz → painel admin (evita 404 JSON feio para quem abre a URL no navegador).
+  app.get('/', async (_req, reply) => {
+    return reply.redirect('/admin')
+  })
 }

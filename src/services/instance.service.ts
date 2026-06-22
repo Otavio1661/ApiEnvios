@@ -7,7 +7,7 @@ import type { FastifyBaseLogger } from 'fastify'
 import { prisma } from '../utils/prisma'
 import { config } from '../config'
 import { providers } from '../providers'
-import { slugify } from '../utils/slug'
+import { slugify, slugSchema } from '../utils/slug'
 
 // Tempo de validade do QR em segundos
 export const QR_TTL_SECONDS = 45
@@ -17,11 +17,27 @@ export const QR_TTL_SECONDS = 45
 export class InstanceError extends Error {
   constructor(
     message: string,
-    public readonly code: 'NAME_TAKEN' | 'SLUG_TAKEN' | 'NOT_FOUND',
+    public readonly code: 'NAME_TAKEN' | 'SLUG_TAKEN' | 'NOT_FOUND' | 'INVALID_SLUG',
   ) {
     super(message)
     this.name = 'InstanceError'
   }
+}
+
+// Normaliza um slug explícito (kebab-case) e VALIDA o resultado. Defesa em
+// profundidade: mesmo que o slug chegue sem passar pelo Zod do caller, um
+// resultado vazio/curto/invalido após o slugify é rejeitado (em vez de gravar
+// um slug quebrado no banco).
+function normalizeExplicitSlug(input: string): string {
+  const normalized = slugify(input)
+  const parsed = slugSchema.safeParse(normalized)
+  if (!parsed.success) {
+    throw new InstanceError(
+      parsed.error.issues[0]?.message ?? 'Slug inválido após normalização.',
+      'INVALID_SLUG',
+    )
+  }
+  return normalized
 }
 
 // Identifica violação de unicidade do Prisma (P2002) e diz qual coluna bateu.
@@ -189,7 +205,7 @@ export async function createInstance(input: {
   apiClientId: string
 }): Promise<Instance> {
   const slug = input.slug
-    ? slugify(input.slug)
+    ? normalizeExplicitSlug(input.slug)
     : await generateUniqueSlug(input.name ?? input.provider.toLowerCase())
 
   try {
@@ -226,9 +242,9 @@ export async function updateInstance(input: {
   const data: Prisma.InstanceUpdateInput = {}
   if (input.name !== undefined) data.name = input.name || null
   if (input.slug !== undefined) {
-    // Slug informado no rename é respeitado tal qual (só normalizado). Colisão com
-    // OUTRA instância → P2002 → InstanceError('SLUG_TAKEN') [409] no catch abaixo.
-    data.slug = slugify(input.slug)
+    // Slug informado no rename é normalizado E validado (defesa em profundidade).
+    // Colisão com OUTRA instância → P2002 → InstanceError('SLUG_TAKEN') [409] abaixo.
+    data.slug = normalizeExplicitSlug(input.slug)
   }
 
   try {

@@ -94,7 +94,8 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(201).send(toInstanceResponse(instance))
       } catch (err: any) {
         if (err instanceof InstanceError) {
-          return reply.status(409).send({ error: err.message, code: err.code })
+          const status = err.code === 'INVALID_SLUG' ? 400 : 409
+          return reply.status(status).send({ error: err.message, code: err.code })
         }
         request.log.error(`[Instances] Falha ao criar instância: ${err.message}`)
         return reply.status(500).send({ error: 'Falha ao criar a instância' })
@@ -125,7 +126,7 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.send(toInstanceResponse(instance))
       } catch (err: any) {
         if (err instanceof InstanceError) {
-          const status = err.code === 'NOT_FOUND' ? 404 : 409
+          const status = err.code === 'NOT_FOUND' ? 404 : err.code === 'INVALID_SLUG' ? 400 : 409
           return reply.status(status).send({ error: err.message, code: err.code })
         }
         request.log.error(`[Instances] Falha ao renomear instância: ${err.message}`)
@@ -155,7 +156,13 @@ export async function instancesRoutes(app: FastifyInstance) {
         prisma.instance.count({ where: { apiClientId, status: 'ACTIVE' } }),
         prisma.instance.count({ where: { apiClientId, status: 'BANNED' } }),
         prisma.instance.count({ where: { apiClientId } }),
-        prisma.instance.aggregate({ where: { apiClientId }, _sum: { sentToday: true } }),
+        // Fase C3 moveu os contadores de envio para os NÚMEROS do pool
+        // (InstanceNumber); Instance.sentToday não é mais incrementado. Somamos
+        // pelos números das instâncias do tenant.
+        prisma.instanceNumber.aggregate({
+          where: { instance: { apiClientId } },
+          _sum: { sentToday: true },
+        }),
       ])
 
       return reply.send({
