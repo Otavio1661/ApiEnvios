@@ -188,7 +188,12 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
 // API key da conta ADMIN (admin-key). Centraliza a regra usada para bypass de
 // quota e visibilidade do provider WAHA.
 export function isSuperAdmin(request: FastifyRequest): boolean {
-  return request.authUser?.role === 'SUPER_ADMIN' || request.apiClient?.role === 'ADMIN'
+  // Humano (JWT/cookie do painel): decide ESTRITAMENTE pelo papel do usuário.
+  // Assim, um usuário comum que por acaso pertence à conta ADMIN NÃO herda
+  // poderes de super admin (evita escalonamento de privilégio).
+  if (request.authUser) return request.authUser.role === 'SUPER_ADMIN'
+  // Máquina (API key, sem usuário): a chave da conta ADMIN é credencial mestre.
+  return request.apiClient?.role === 'ADMIN'
 }
 
 // Guard: exige super admin (usar depois de authManage/authJwt).

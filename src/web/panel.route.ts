@@ -101,9 +101,11 @@ async function requirePanelAdmin(request: FastifyRequest, reply: FastifyReply) {
   // Reusa a verificação de sessão; se redirecionou, a resposta já foi enviada.
   await requirePanelAuth(request, reply)
   if (reply.sent) return
-  if (request.apiClient?.role !== 'ADMIN') {
+  // Gestão é restrita ao SUPER ADMIN (papel da pessoa), não a quem apenas pertence
+  // à conta ADMIN. isSuperAdmin, no painel (com authUser), decide pelo papel do user.
+  if (!isSuperAdmin(request)) {
     return reply.redirect(
-      `/admin?err=${encodeURIComponent('Acesso restrito a administradores.')}`,
+      `/admin?err=${encodeURIComponent('Acesso restrito ao super admin.')}`,
     )
   }
 }
@@ -243,7 +245,7 @@ export async function panelRoutes(app: FastifyInstance) {
     { preHandler: requirePanelAuth },
     async (request, reply) => {
       const account = request.apiClient!
-      const isAdmin = account.role === 'ADMIN'
+      const isAdmin = isSuperAdmin(request)
       const instances = (await listInstances(account.id)).map(toInstanceResponse)
       return renderPage(
         app,
@@ -378,7 +380,7 @@ export async function panelRoutes(app: FastifyInstance) {
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           sendError: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
-        { user: request.authUser, isAdmin: request.apiClient!.role === 'ADMIN' },
+        { user: request.authUser, isAdmin: isSuperAdmin(request) },
       )
     },
   )
