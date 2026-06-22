@@ -9,7 +9,7 @@ import { prisma } from '../utils/prisma'
 import { config } from '../config'
 import { verifyPassword } from '../utils/password'
 import { normalizePhone } from '../utils/helpers'
-import { enqueueSend } from '../queues/send-message.queue'
+import { enqueueSend, requeueSend, removeSendJob } from '../queues/send-message.queue'
 import {
   listInstances,
   findInstanceByIdOrSlug,
@@ -397,6 +397,68 @@ export async function panelRoutes(app: FastifyInstance) {
         return reply.redirect(
           `/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao enfileirar a mensagem.')}`,
         )
+      }
+    },
+  )
+
+  // ── POST /instances/:id/messages/:msgId/resend — Reenvia (FAILED) ─
+  app.post<{ Params: { id: string; msgId: string } }>(
+    '/instances/:id/messages/:msgId/resend',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.redirect('/admin')
+
+      const message = await prisma.message.findFirst({
+        where: { id: request.params.msgId, apiClientId: request.apiClient!.id, instanceId: instance.id },
+      })
+      if (!message) {
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Mensagem não encontrada.')}`)
+      }
+      if (message.status !== 'FAILED') {
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Só reenvia mensagens com falha.')}`)
+      }
+
+      try {
+        const updated = await prisma.message.update({
+          where: { id: message.id },
+          data: { status: 'QUEUED', retryCount: 0, errorMessage: null, failedAt: null },
+        })
+        await requeueSend(updated.id, updated.maxRetries)
+        return reply.redirect(`/admin/instances/${instance.id}?ok=${encodeURIComponent('Mensagem reenfileirada.')}`)
+      } catch (err: any) {
+        request.log.error(`[Painel] Falha ao reenviar mensagem: ${err.message}`)
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao reenviar.')}`)
+      }
+    },
+  )
+
+  // ── POST /instances/:id/messages/:msgId/delete — Remove do histórico ─
+  app.post<{ Params: { id: string; msgId: string } }>(
+    '/instances/:id/messages/:msgId/delete',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.redirect('/admin')
+
+      const message = await prisma.message.findFirst({
+        where: { id: request.params.msgId, apiClientId: request.apiClient!.id, instanceId: instance.id },
+        select: { id: true },
+      })
+      if (!message) {
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Mensagem não encontrada.')}`)
+      }
+
+      try {
+        await prisma.$transaction([
+          prisma.messageAttempt.deleteMany({ where: { messageId: message.id } }),
+          prisma.message.delete({ where: { id: message.id } }),
+        ])
+        await removeSendJob(message.id)
+        return reply.redirect(`/admin/instances/${instance.id}?ok=${encodeURIComponent('Mensagem removida do histórico.')}`)
+      } catch (err: any) {
+        request.log.error(`[Painel] Falha ao excluir mensagem: ${err.message}`)
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao excluir.')}`)
       }
     },
   )

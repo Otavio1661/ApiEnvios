@@ -35,7 +35,14 @@
     <h2>Números do pool</h2>
     <span class="muted">Enviadas hoje (total do pool): <strong><%= it.sentTodayTotal %></strong></span>
   </div>
-  <p class="muted">Cada número é uma sessão/conexão real do WhatsApp dentro deste pool. Conecte cada número escaneando o QR (Evolution/WAHA) ou direto (Cloud API).</p>
+  <p class="muted">Cada número é uma sessão/conexão real do WhatsApp dentro deste pool. <strong>É por estes números que as mensagens são enviadas</strong> — o roteador escolhe automaticamente o melhor número conectado (rodízio anti-ban). Conecte cada número escaneando o QR (Evolution/WAHA) ou direto (Cloud API).</p>
+
+  <% const algumConectado = it.numbers.some(function(n){ return n.connectionState === 'CONNECTED' }); %>
+  <% if (it.numbers.length > 0 && !algumConectado) { %>
+    <div class="alert alert-error">⚠️ Nenhum número do pool está <strong>CONNECTED</strong>. O envio de mensagens vai falhar até você conectar ao menos um número abaixo (escaneie o QR).</div>
+  <% } else if (algumConectado) { %>
+    <div class="alert alert-ok">✓ Pool pronto para envio: <strong><%= it.numbers.filter(function(n){ return n.connectionState === 'CONNECTED' }).length %></strong> número(s) conectado(s).</div>
+  <% } %>
 
   <table class="instances-table">
     <thead>
@@ -104,11 +111,12 @@
      x-init="startPolling()">
 
   <div class="card">
-    <h2>Conexão</h2>
+    <h2>Conexão da instância <span class="badge badge-status">legado</span></h2>
+    <p class="muted">Esta é a conexão antiga, no nível da instância. <strong>Ela não é usada para enviar</strong> — o envio roteia pelos <em>Números do pool</em> acima. Mantida por compatibilidade; para operar, conecte os números do pool.</p>
     <p>Status: <span class="badge" :class="'badge-' + state" x-text="state"></span></p>
 
-    <button class="btn btn-primary" @click="connect()" :disabled="loading">
-      <span x-show="!loading">Conectar</span>
+    <button class="btn btn-ghost" @click="connect()" :disabled="loading">
+      <span x-show="!loading">Conectar (legado)</span>
       <span x-show="loading" x-cloak>Conectando...</span>
     </button>
 
@@ -146,11 +154,11 @@
   <h2>Últimas mensagens</h2>
   <table class="instances-table">
     <thead>
-      <tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Criada em</th></tr>
+      <tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Criada em</th><th>Ações</th></tr>
     </thead>
     <tbody>
       <% if (it.messages.length === 0) { %>
-        <tr><td colspan="4" class="muted center">Nenhuma mensagem ainda.</td></tr>
+        <tr><td colspan="5" class="muted center">Nenhuma mensagem ainda.</td></tr>
       <% } %>
       <% it.messages.forEach(function(m){ %>
         <tr>
@@ -158,6 +166,17 @@
           <td><%= m.type %></td>
           <td><span class="badge badge-msg"><%= m.status %></span></td>
           <td><%= new Date(m.createdAt).toLocaleString('pt-BR') %></td>
+          <td class="number-actions">
+            <% if (m.status === 'FAILED') { %>
+              <form method="POST" action="/admin/instances/<%= it.instance.id %>/messages/<%= m.id %>/resend" style="display:inline">
+                <button type="submit" class="btn btn-ghost">Reenviar</button>
+              </form>
+            <% } %>
+            <form method="POST" action="/admin/instances/<%= it.instance.id %>/messages/<%= m.id %>/delete"
+                  onsubmit="return confirm('Remover esta mensagem do histórico?')" style="display:inline">
+              <button type="submit" class="btn btn-ghost btn-danger">Excluir</button>
+            </form>
+          </td>
         </tr>
       <% }) %>
     </tbody>

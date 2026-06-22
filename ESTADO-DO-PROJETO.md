@@ -101,6 +101,11 @@ ApiClient (tenant)
 | 6 | **WAHA `default` desconectado** — durante testes de QR foi feito logout; número 554497341687 precisa re-escanear (operacional, não é código). | — |
 | 7 | **Stats agregados da Instance** — telas que somavam `Instance.sentToday` foram ajustadas no detalhe (C4), mas vale revisar outras telas/endpoints (`/v1/instances/stats`) para somar `InstanceNumber`. | 🟢 Baixa |
 
+### Plano de ação — iterações pós bug #1 (combinado com o usuário)
+- **Iteração 2 — Mensagens (✅ Feito 2026-06-22):** reenvio de mensagem com falha (`POST /v1/messages/:id/resend`, só FAILED→QUEUED, reusa fila/anti-ban) e exclusão do histórico (`DELETE /v1/messages/:id`, remove tentativas+msg em transação + tira da fila). Botões "Reenviar" (só em FAILED) e "Excluir" no painel. Validado: 409 em não-FAILED, 202 no reenvio (retryCount/failedAt resetados), 204+404 no delete, 82 testes verdes.
+- **Iteração 3 — Bugs baixa prioridade (lote, pendente):** #3 redirect `/`→`/admin` · #4 dupla normalização de slug · #5 `console.error`→Pino · #7 revisar stats agregados.
+- **Iteração 4 — #2 WAHA Core (pendente):** detectar/avisar (UI+API) que WAHA Core só aceita sessão `default`.
+
 ### Roadmap maior (futuro, fora do escopo imediato)
 - **Produção/Deploy:** Dockerfile multi-stage; métricas Prometheus (`/metrics`).
 - **Funcionalidades:** templates Cloud API (mensagens proativas); gestão de membros pela conta (OWNER convida MEMBER).

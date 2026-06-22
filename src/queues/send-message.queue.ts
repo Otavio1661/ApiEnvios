@@ -28,3 +28,23 @@ export async function enqueueSend(messageId: string, maxRetries = 3) {
     },
   )
 }
+
+// ── Remove o job de uma mensagem da fila (best-effort) ─────────
+// Como usamos jobId = messageId, um job antigo (ex.: já falhado e mantido no
+// histórico por removeOnFail) impediria re-enfileirar com o mesmo id. Remover
+// antes garante que requeueSend crie um job novo. Não lança.
+export async function removeSendJob(messageId: string): Promise<void> {
+  try {
+    await sendMessageQueue.remove(messageId)
+  } catch {
+    // job inexistente/já removido — ignorar
+  }
+}
+
+// ── Re-enfileira uma mensagem (reenvio) ───────────────────────
+// Remove o job anterior (mesmo jobId) e enfileira de novo. Usado pelo reenvio
+// manual de mensagens com falha.
+export async function requeueSend(messageId: string, maxRetries = 3) {
+  await removeSendJob(messageId)
+  return enqueueSend(messageId, maxRetries)
+}
