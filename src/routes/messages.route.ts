@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
-import { enqueueSend } from '../queues/send-message.queue'
+import { enqueueSend, requeueSend, removeSendJob } from '../queues/send-message.queue'
 import { normalizePhone } from '../utils/helpers'
 
 const sendSchema = z.object({
@@ -122,6 +122,61 @@ export async function messagesRoutes(app: FastifyInstance) {
       const total = await prisma.message.count({ where })
 
       return reply.send({ data: messages, page, limit, total })
+    },
+  })
+
+  // ── POST /messages/:id/resend — Reenfileira uma mensagem com falha ─
+  // Só permite reenviar mensagens em FAILED (reenviar uma já entregue duplicaria
+  // o envio). Reseta o estado e re-enfileira reusando a fila/anti-ban existentes.
+  app.post<{ Params: { id: string } }>('/messages/:id/resend', {
+    preHandler: authManage,
+    handler: async (request, reply) => {
+      const message = await prisma.message.findFirst({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id },
+      })
+      if (!message) return reply.status(404).send({ error: 'Mensagem não encontrada' })
+
+      if (message.status !== 'FAILED') {
+        return reply.status(409).send({
+          error: 'Só é possível reenviar mensagens com falha (FAILED)',
+          status: message.status,
+        })
+      }
+
+      const updated = await prisma.message.update({
+        where: { id: message.id },
+        data: {
+          status: 'QUEUED',
+          retryCount: 0,
+          errorMessage: null,
+          failedAt: null,
+        },
+      })
+
+      await requeueSend(updated.id, updated.maxRetries)
+      return reply.status(202).send({ id: updated.id, status: updated.status })
+    },
+  })
+
+  // ── DELETE /messages/:id — Remove a mensagem do histórico ─────
+  // Escopado ao tenant. Remove as tentativas (sem onDelete cascade no schema) e a
+  // mensagem numa transação, e tira o job da fila (best-effort).
+  app.delete<{ Params: { id: string } }>('/messages/:id', {
+    preHandler: authManage,
+    handler: async (request, reply) => {
+      const message = await prisma.message.findFirst({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id },
+        select: { id: true },
+      })
+      if (!message) return reply.status(404).send({ error: 'Mensagem não encontrada' })
+
+      await prisma.$transaction([
+        prisma.messageAttempt.deleteMany({ where: { messageId: message.id } }),
+        prisma.message.delete({ where: { id: message.id } }),
+      ])
+      await removeSendJob(message.id)
+
+      return reply.status(204).send()
     },
   })
 }

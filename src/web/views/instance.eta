@@ -154,11 +154,11 @@
   <h2>Últimas mensagens</h2>
   <table class="instances-table">
     <thead>
-      <tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Criada em</th></tr>
+      <tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Criada em</th><th>Ações</th></tr>
     </thead>
     <tbody>
       <% if (it.messages.length === 0) { %>
-        <tr><td colspan="4" class="muted center">Nenhuma mensagem ainda.</td></tr>
+        <tr><td colspan="5" class="muted center">Nenhuma mensagem ainda.</td></tr>
       <% } %>
       <% it.messages.forEach(function(m){ %>
         <tr>
@@ -166,6 +166,17 @@
           <td><%= m.type %></td>
           <td><span class="badge badge-msg"><%= m.status %></span></td>
           <td><%= new Date(m.createdAt).toLocaleString('pt-BR') %></td>
+          <td class="number-actions">
+            <% if (m.status === 'FAILED') { %>
+              <form method="POST" action="/admin/instances/<%= it.instance.id %>/messages/<%= m.id %>/resend" style="display:inline">
+                <button type="submit" class="btn btn-ghost">Reenviar</button>
+              </form>
+            <% } %>
+            <form method="POST" action="/admin/instances/<%= it.instance.id %>/messages/<%= m.id %>/delete"
+                  onsubmit="return confirm('Remover esta mensagem do histórico?')" style="display:inline">
+              <button type="submit" class="btn btn-ghost btn-danger">Excluir</button>
+            </form>
+          </td>
         </tr>
       <% }) %>
     </tbody>
