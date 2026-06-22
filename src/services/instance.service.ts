@@ -104,17 +104,32 @@ export async function refreshQr(instance: Instance): Promise<Instance> {
     providerInstanceId = created.instanceId
     qrCode = created.qrCode
   } else {
-    // Já existe no provider: reconecta para obter o QR atual (sem recriar)
-    const result = await provider.connect(providerInstanceId)
-    qrCode = result.qrCode
+    // Já existe no provider: reconecta para obter o QR atual (sem recriar).
+    // Auto-recuperação: se a sessão sumiu no provider (404), recria com o mesmo nome.
+    try {
+      const result = await provider.connect(providerInstanceId)
+      qrCode = result.qrCode
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        const created = await provider.createInstance(providerInstanceId)
+        providerInstanceId = created.instanceId
+        qrCode = created.qrCode
+      } else {
+        throw err
+      }
+    }
   }
 
+  // O QR da Evolution v2 chega de forma assíncrona via webhook (QRCODE_UPDATED).
+  // Aqui o provider pode devolver vazio: nesse caso NÃO sobrescrevemos o qrCode
+  // já persistido (evita "apagar" um QR válido). O TTL só é renovado quando há
+  // QR novo vindo do provider.
   return prisma.instance.update({
     where: { id: instance.id },
     data: {
       instanceId: providerInstanceId,
-      qrCode: qrCode ?? null,
-      qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000),
+      qrCode: qrCode ?? instance.qrCode,
+      ...(qrCode ? { qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000) } : {}),
       connectionState: 'QR_PENDING',
     },
   })
@@ -259,8 +274,12 @@ export async function connectInstance(
     }
   }
 
+  // Webhook ANTES e DEPOIS de criar/renovar a sessão (mesma razão de connectNumber):
+  // WAHA precisa do pendingWebhookUrl antes do create; Evolution só aceita setWebhook
+  // após a sessão `inst-<id>` existir. registerInboundWebhook é best-effort (idempotente).
   await registerInboundWebhook(instance, log)
   const updated = await refreshQr(instance)
+  await registerInboundWebhook(updated, log)
   return {
     instanceId: updated.instanceId,
     qrCode: updated.qrCode,
@@ -372,17 +391,33 @@ export async function refreshQrNumber(number: InstanceNumber): Promise<InstanceN
     providerInstanceId = created.instanceId
     qrCode = created.qrCode
   } else {
-    // Já existe no provider: reconecta para obter o QR atual (sem recriar)
-    const result = await provider.connect(providerInstanceId)
-    qrCode = result.qrCode
+    // Já existe no provider: reconecta para obter o QR atual (sem recriar).
+    // Auto-recuperação: se a sessão sumiu no provider (404 — ex.: deletada
+    // manualmente ou perdida), recria com o mesmo nome em vez de falhar.
+    try {
+      const result = await provider.connect(providerInstanceId)
+      qrCode = result.qrCode
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        const created = await provider.createInstance(providerInstanceId)
+        providerInstanceId = created.instanceId
+        qrCode = created.qrCode
+      } else {
+        throw err
+      }
+    }
   }
 
+  // O QR da Evolution v2 chega de forma assíncrona via webhook (QRCODE_UPDATED).
+  // Aqui o provider pode devolver vazio: nesse caso NÃO sobrescrevemos o qrCode
+  // já persistido (evita "apagar" um QR válido). O TTL só é renovado quando há
+  // QR novo vindo do provider.
   return prisma.instanceNumber.update({
     where: { id: number.id },
     data: {
       providerInstanceId,
-      qrCode: qrCode ?? null,
-      qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000),
+      qrCode: qrCode ?? number.qrCode,
+      ...(qrCode ? { qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000) } : {}),
       connectionState: 'QR_PENDING',
     },
   })
@@ -408,8 +443,18 @@ export async function connectNumber(
     }
   }
 
+  // Webhook registrado ANTES e DEPOIS de criar/renovar a sessão, pois os providers
+  // diferem:
+  //  - WAHA: o setWebhook precisa vir ANTES (guarda pendingWebhookUrl, que entra no
+  //    config da sessão criada em refreshQrNumber). A 2ª chamada é um PUT idempotente.
+  //  - Evolution: a sessão `num-<id>` só existe APÓS refreshQrNumber; antes dela o
+  //    setWebhook retorna 404 (best-effort, sem efeito). A 2ª chamada (com a sessão
+  //    já criada) é a que efetivamente registra o webhook para o QRCODE_UPDATED.
+  // registerNumberInboundWebhook é best-effort (não lança), então a chamada redundante
+  // é segura.
   await registerNumberInboundWebhook(number, log)
   const updated = await refreshQrNumber(number)
+  await registerNumberInboundWebhook(updated, log)
   return {
     instanceId: updated.providerInstanceId,
     qrCode: updated.qrCode,

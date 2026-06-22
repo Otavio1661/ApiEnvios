@@ -135,7 +135,8 @@ export class EvolutionProvider implements IWhatsappProvider {
     const events = ['MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED']
     try {
       const resp = await this.client.post(`/webhook/set/${instanceId}`, {
-        webhook: { enabled: true, url, webhookByEvents: false, events },
+        // base64: true garante que o evento QRCODE_UPDATED traga o QR já em base64.
+        webhook: { enabled: true, url, webhookByEvents: false, base64: true, events },
       })
       logger.debug(`[Evolution] setWebhook ok (${instanceId}): ${JSON.stringify(resp.data)}`)
     } catch (err: any) {

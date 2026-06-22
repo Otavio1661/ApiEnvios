@@ -5,6 +5,7 @@ import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { mapInboundStatus, normalizeProvider, isStatusAdvance } from '../services/inbound-status.service'
 import { dispatchWebhook } from '../services/notification.service'
+import { QR_TTL_SECONDS } from '../services/instance.service'
 import type { MessageStatus } from '../types'
 
 const webhookSchema = z.object({
@@ -110,7 +111,11 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
         if (update.qrCode) {
           await prisma.instanceNumber.update({
             where: { id: number.id },
-            data: { qrCode: update.qrCode, connectionState: 'QR_PENDING' },
+            data: {
+              qrCode: update.qrCode,
+              qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000),
+              connectionState: 'QR_PENDING',
+            },
           })
         }
 
@@ -160,11 +165,15 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
           })
         }
 
-        // 3b. Evento de QR → atualiza qrCode da instância.
+        // 3b. Evento de QR → atualiza qrCode da instância (carimbando o TTL).
         if (update.qrCode) {
           await prisma.instance.update({
             where: { id: instance.id },
-            data: { qrCode: update.qrCode, connectionState: 'QR_PENDING' },
+            data: {
+              qrCode: update.qrCode,
+              qrExpiresAt: new Date(Date.now() + QR_TTL_SECONDS * 1000),
+              connectionState: 'QR_PENDING',
+            },
           })
         }
 

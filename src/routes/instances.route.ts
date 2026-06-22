@@ -220,11 +220,16 @@ export async function instancesRoutes(app: FastifyInstance) {
       }
 
       // Registra o webhook inbound no provider (best-effort — não falha o connect).
-      // Para WAHA, deve vir ANTES do createInstance para entrar no config da sessão.
+      // Para WAHA, deve vir ANTES do createInstance para entrar no config da sessão
+      // (pendingWebhookUrl). Para Evolution, a sessão só existe após o refreshQr, então
+      // re-registramos DEPOIS (a sessão inexistente faz o 1º setWebhook retornar 404).
       await registerInboundWebhook(instance, request.log)
 
       try {
         const updated = await refreshQr(instance)
+        // Pós-registro: agora a sessão existe no provider (Evolution grava o webhook;
+        // WAHA faz um PUT idempotente). Best-effort.
+        await registerInboundWebhook(updated, request.log)
         return reply.send({
           instanceId: updated.instanceId,
           qrCode: updated.qrCode,
