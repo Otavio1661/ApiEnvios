@@ -94,7 +94,7 @@
       <span>Provider</span>
       <select name="provider">
         <option value="EVOLUTION">Evolution</option>
-        <option value="WAHA">WAHA</option>
+        <% if (it.isSuperAdmin) { %><option value="WAHA">WAHA (teste — super admin)</option><% } %>
         <option value="CLOUD_API">Cloud API</option>
       </select>
     </label>

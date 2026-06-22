@@ -226,6 +226,9 @@ model ApiClient {
   // Rate limiting por cliente
   rateLimit   Int      @default(100)    // req/min
 
+  // Quota de instâncias (pools) que a conta pode criar. SUPER_ADMIN ignora.
+  maxInstances Int     @default(1)
+
   // Métricas
   totalSent   Int      @default(0)
 
@@ -308,8 +311,9 @@ enum ClientRole {
 }
 
 enum UserRole {
-  OWNER       // dono da conta
-  MEMBER      // membro convidado da conta
+  OWNER        // dono da conta — exibido como "Admin" no painel
+  MEMBER       // membro convidado da conta — exibido como "Usuário"
+  SUPER_ADMIN  // staff da plataforma: controle global de todas as contas
 }
 
 enum InstanceConnState {

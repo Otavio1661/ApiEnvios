@@ -27,7 +27,9 @@ import {
   refreshQrNumber,
   syncNumberStatus,
   deleteNumber,
+  assertInstanceQuota,
 } from '../services/instance.service'
+import { isSuperAdmin } from '../middlewares/auth.middleware'
 import { slugSchema } from '../utils/slug'
 import {
   ProvisioningError,
@@ -119,6 +121,7 @@ const manageClientSchema = z
     role: z.enum(['ADMIN', 'CLIENT']).default('CLIENT'),
     fallbackEnabled: z.boolean().default(false),
     rateLimit: z.coerce.number().int().positive().default(100),
+    maxInstances: z.coerce.number().int().positive().default(1),
     ownerEmail: z.string().email().optional(),
     ownerPassword: z.string().min(8).optional(),
     ownerName: z.string().optional(),
@@ -134,7 +137,12 @@ const manageUserSchema = z.object({
   email: z.string().email('E-mail inválido.'),
   password: z.string().min(8, 'A senha deve ter ao menos 8 caracteres.'),
   name: z.string().optional(),
-  role: z.enum(['OWNER', 'MEMBER']).default('OWNER'),
+  role: z.enum(['OWNER', 'MEMBER', 'SUPER_ADMIN']).default('OWNER'),
+})
+
+// Atualização da quota (maxInstances) de uma conta — só super admin.
+const manageQuotaSchema = z.object({
+  maxInstances: z.coerce.number().int().positive(),
 })
 
 // Normaliza valores de formulário HTML: strings vazias → undefined; checkbox → boolean.
@@ -245,6 +253,7 @@ export async function panelRoutes(app: FastifyInstance) {
           title: 'Instâncias — ApiEnvios',
           account: { name: account.name, apiKey: account.apiKey },
           instances,
+          isSuperAdmin: isSuperAdmin(request),
           pageError: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
         { user: request.authUser, isAdmin },
@@ -265,7 +274,16 @@ export async function panelRoutes(app: FastifyInstance) {
       return reply.redirect(`/admin?err=${encodeURIComponent(msg)}`)
     }
 
+    // WAHA é restrito ao super admin.
+    if (parsed.data.provider === 'WAHA' && !isSuperAdmin(request)) {
+      return reply.redirect(`/admin?err=${encodeURIComponent('O provider WAHA é restrito ao super admin.')}`)
+    }
+
     try {
+      // Quota por conta (super admin ignora).
+      if (!isSuperAdmin(request)) {
+        await assertInstanceQuota(request.apiClient!.id)
+      }
       const instance = await createInstance({
         name: parsed.data.name,
         slug: parsed.data.slug,
@@ -355,6 +373,7 @@ export async function panelRoutes(app: FastifyInstance) {
           messages,
           numbers,
           sentTodayTotal,
+          isSuperAdmin: isSuperAdmin(request),
           sent: request.query.sent === '1',
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           sendError: request.query.err ? decodeURIComponent(request.query.err) : null,
@@ -486,6 +505,13 @@ export async function panelRoutes(app: FastifyInstance) {
         const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
         return reply.redirect(
           `/admin/instances/${instance.id}?err=${encodeURIComponent(msg)}`,
+        )
+      }
+
+      // WAHA restrito ao super admin.
+      if (parsed.data.provider === 'WAHA' && !isSuperAdmin(request)) {
+        return reply.redirect(
+          `/admin/instances/${instance.id}?err=${encodeURIComponent('O provider WAHA é restrito ao super admin.')}`,
         )
       }
 
@@ -669,6 +695,7 @@ export async function panelRoutes(app: FastifyInstance) {
       // Checkbox HTML: presente ('on'/'true') ⇒ true; ausente ⇒ false.
       fallbackEnabled: raw.fallbackEnabled === 'on' || raw.fallbackEnabled === 'true',
       rateLimit: emptyToUndefined(raw.rateLimit),
+      maxInstances: emptyToUndefined(raw.maxInstances),
       ownerEmail: emptyToUndefined(raw.ownerEmail),
       ownerPassword: emptyToUndefined(raw.ownerPassword),
       ownerName: emptyToUndefined(raw.ownerName),
@@ -749,6 +776,34 @@ export async function panelRoutes(app: FastifyInstance) {
       const msg = removed ? 'Usuário removido.' : 'Usuário não encontrado.'
       const key = removed ? 'ok' : 'err'
       return reply.redirect(`/admin/manage?${key}=${encodeURIComponent(msg)}`)
+    },
+  )
+
+  // ── POST /manage/clients/:id/quota — Atualiza a quota (maxInstances) ─
+  app.post<{ Params: { id: string } }>(
+    '/manage/clients/:id/quota',
+    { preHandler: requirePanelAdmin },
+    async (request, reply) => {
+      const parsed = manageQuotaSchema.safeParse({
+        maxInstances: (request.body as Record<string, unknown>)?.maxInstances,
+      })
+      if (!parsed.success) {
+        return reply.redirect(
+          `/admin/manage?err=${encodeURIComponent('Quota inválida (use um inteiro positivo).')}`,
+        )
+      }
+      try {
+        await prisma.apiClient.update({
+          where: { id: request.params.id },
+          data: { maxInstances: parsed.data.maxInstances },
+        })
+        return reply.redirect(
+          `/admin/manage?ok=${encodeURIComponent('Quota atualizada.')}`,
+        )
+      } catch (err: any) {
+        request.log.error(`[Painel] Falha ao atualizar quota: ${err.message}`)
+        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Falha ao atualizar a quota.')}`)
+      }
     },
   )
 

@@ -33,6 +33,10 @@
         <span>Limite de envios (rate limit)</span>
         <input type="number" name="rateLimit" value="100" min="1" />
       </label>
+      <label class="field">
+        <span>Quota de instâncias (máx.)</span>
+        <input type="number" name="maxInstances" value="1" min="1" />
+      </label>
       <label class="field-check">
         <input type="checkbox" name="fallbackEnabled" />
         <span>Habilitar fallback entre providers</span>
@@ -86,8 +90,9 @@
       <label class="field">
         <span>Papel</span>
         <select name="role">
-          <option value="OWNER">OWNER</option>
-          <option value="MEMBER">MEMBER</option>
+          <option value="OWNER">Admin (gerencia a conta)</option>
+          <option value="MEMBER">Usuário (membro)</option>
+          <option value="SUPER_ADMIN">Super Admin (plataforma)</option>
         </select>
       </label>
       <button type="submit" class="btn btn-primary">Criar usuário</button>
@@ -106,6 +111,7 @@
         <th>Tipo</th>
         <th>Ativa</th>
         <th>Instâncias</th>
+        <th>Quota</th>
         <th>Usuários</th>
         <th>Enviadas</th>
         <th>ID</th>
@@ -113,14 +119,20 @@
     </thead>
     <tbody>
       <% if (it.clients.length === 0) { %>
-        <tr><td colspan="7" class="muted center">Nenhuma conta ainda.</td></tr>
+        <tr><td colspan="8" class="muted center">Nenhuma conta ainda.</td></tr>
       <% } %>
       <% it.clients.forEach(function(c){ %>
         <tr>
           <td><strong><%= c.name %></strong></td>
           <td><span class="badge badge-msg"><%= c.role %></span></td>
           <td><%= c.active ? 'Sim' : 'Não' %></td>
-          <td><%= c._count.instances %></td>
+          <td><%= c._count.instances %> / <%= c.maxInstances %></td>
+          <td>
+            <form method="POST" action="/admin/manage/clients/<%= c.id %>/quota" class="inline" style="display:flex;gap:4px;align-items:center">
+              <input type="number" name="maxInstances" value="<%= c.maxInstances %>" min="1" style="width:64px" />
+              <button type="submit" class="btn btn-ghost">Salvar</button>
+            </form>
+          </td>
           <td><%= c._count.users %></td>
           <td><%= c.totalSent %></td>
           <td><code><%= c.id %></code></td>
@@ -152,7 +164,7 @@
         <tr>
           <td><%= u.email %></td>
           <td><%= u.name || '—' %></td>
-          <td><span class="badge badge-msg"><%= u.role %></span></td>
+          <td><span class="badge badge-msg"><%= u.role === 'SUPER_ADMIN' ? 'Super Admin' : (u.role === 'OWNER' ? 'Admin' : 'Usuário') %></span></td>
           <td><%= it.clientNames[u.apiClientId] || u.apiClientId %></td>
           <td><%= new Date(u.createdAt).toLocaleString('pt-BR') %></td>
           <td>

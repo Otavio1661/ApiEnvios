@@ -26,13 +26,14 @@ async function main() {
   // Cliente API de desenvolvimento (tenant comum)
   const devClient = await prisma.apiClient.upsert({
     where: { apiKey: 'dev-key-123456' },
-    update: { role: 'CLIENT' },
+    update: { role: 'CLIENT', maxInstances: 5 },
     create: {
       name: 'Cliente Dev',
       apiKey: 'dev-key-123456',
       active: true,
       role: 'CLIENT',
       rateLimit: 1000,
+      maxInstances: 5,
     },
   })
   console.log(`✅ ApiClient criado: ${devClient.name} (key: ${devClient.apiKey})`)
@@ -97,14 +98,14 @@ async function main() {
       update: {
         passwordHash: await hashPassword(config.adminSeed.password),
         name: config.adminSeed.name,
-        role: 'OWNER',
+        role: 'SUPER_ADMIN',
         apiClientId: adminClient.id,
       },
       create: {
         email: config.adminSeed.email,
         passwordHash: await hashPassword(config.adminSeed.password),
         name: config.adminSeed.name,
-        role: 'OWNER',
+        role: 'SUPER_ADMIN',
         apiClientId: adminClient.id,
       },
     })
