@@ -258,7 +258,7 @@ export async function panelRoutes(app: FastifyInstance) {
           isSuperAdmin: isSuperAdmin(request),
           pageError: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
-        { user: request.authUser, isAdmin },
+        { user: request.authUser, isAdmin, activeNav: 'instances' },
       )
     },
   )
@@ -380,7 +380,7 @@ export async function panelRoutes(app: FastifyInstance) {
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           sendError: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
-        { user: request.authUser, isAdmin: isSuperAdmin(request) },
+        { user: request.authUser, isAdmin: isSuperAdmin(request), activeNav: 'instances' },
       )
     },
   )
@@ -683,7 +683,7 @@ export async function panelRoutes(app: FastifyInstance) {
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           err: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
-        { user: request.authUser, isAdmin: true },
+        { user: request.authUser, isAdmin: true, activeNav: 'manage' },
       )
     },
   )

@@ -4,28 +4,37 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title><%= it.title || 'ApiEnvios' %></title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/admin/assets/styles.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
   <% if (it.user) { %>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a href="/admin" class="brand">ApiEnvios</a>
-      <nav class="topnav">
+  <header class="navbar">
+    <div class="navbar-inner">
+      <a href="/admin" class="brand"><span class="brand-mark"></span> ApiEnvios</a>
+      <nav class="nav-links">
+        <a href="/admin" class="nav-link <%= it.activeNav === 'instances' ? 'active' : '' %>">Instâncias</a>
         <% if (it.isAdmin) { %>
-        <a href="/admin/manage" class="btn btn-ghost">Gestão</a>
+        <a href="/admin/manage" class="nav-link <%= it.activeNav === 'manage' ? 'active' : '' %>">Gestão</a>
         <% } %>
+      </nav>
+      <div class="nav-user">
         <span class="user-email"><%= it.user.email %></span>
         <form method="POST" action="/admin/logout" class="inline">
-          <button type="submit" class="btn btn-ghost">Sair</button>
+          <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--navy-fg)">Sair</button>
         </form>
-      </nav>
+      </div>
     </div>
   </header>
   <% } %>
   <main class="container">
     <%~ it.body %>
   </main>
+  <% if (it.user) { %>
+  <footer class="app-footer">ApiEnvios · plataforma de envios WhatsApp</footer>
+  <% } %>
 </body>
 </html>
