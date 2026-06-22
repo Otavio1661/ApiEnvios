@@ -31,6 +31,8 @@ export interface CreateClientInput {
   role: 'ADMIN' | 'CLIENT'
   fallbackEnabled: boolean
   rateLimit: number
+  // Opcional: ausente ⇒ usa o default do schema (1).
+  maxInstances?: number
   // Opcional: cria também o usuário OWNER vinculado à conta criada.
   ownerEmail?: string
   ownerPassword?: string
@@ -97,7 +99,7 @@ export interface CreateUserInput {
   email: string
   password: string
   name?: string
-  role: 'OWNER' | 'MEMBER'
+  role: 'OWNER' | 'MEMBER' | 'SUPER_ADMIN'
 }
 
 // Cria um usuário vinculado a uma conta existente. Lança
@@ -147,6 +149,7 @@ export function listClients() {
       active: true,
       fallbackEnabled: true,
       rateLimit: true,
+      maxInstances: true,
       totalSent: true,
       createdAt: true,
       _count: { select: { instances: true, users: true } },

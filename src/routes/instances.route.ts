@@ -3,7 +3,7 @@
 // Reaproveita os métodos já existentes dos providers (createInstance/getInstanceStatus/deleteInstance).
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { authManage, authInstance } from '../middlewares/auth.middleware'
+import { authManage, authInstance, isSuperAdmin } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { providers } from '../providers'
 import { enqueueSend } from '../queues/send-message.queue'
@@ -15,6 +15,7 @@ import {
   registerInboundWebhook,
   syncInstanceStatus,
   createInstance,
+  assertInstanceQuota,
   findInstanceByIdOrSlug,
   updateInstance,
   InstanceError,
@@ -83,7 +84,19 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
       }
 
+      // WAHA é restrito ao super admin (uso de teste). Demais papéis: bloqueado.
+      if (body.data.provider === 'WAHA' && !isSuperAdmin(request)) {
+        return reply.status(403).send({
+          error: 'O provider WAHA é restrito ao super admin.',
+          code: 'WAHA_RESTRICTED',
+        })
+      }
+
       try {
+        // Quota por conta (super admin ignora).
+        if (!isSuperAdmin(request)) {
+          await assertInstanceQuota(request.apiClient!.id)
+        }
         const instance = await createInstance({
           name: body.data.name,
           slug: body.data.slug,
@@ -94,7 +107,8 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(201).send(toInstanceResponse(instance))
       } catch (err: any) {
         if (err instanceof InstanceError) {
-          const status = err.code === 'INVALID_SLUG' ? 400 : 409
+          const status =
+            err.code === 'INVALID_SLUG' ? 400 : err.code === 'QUOTA_EXCEEDED' ? 403 : 409
           return reply.status(status).send({ error: err.message, code: err.code })
         }
         request.log.error(`[Instances] Falha ao criar instância: ${err.message}`)
@@ -380,6 +394,14 @@ export async function instancesRoutes(app: FastifyInstance) {
 
       const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      // WAHA restrito ao super admin.
+      if (body.data.provider === 'WAHA' && !isSuperAdmin(request)) {
+        return reply.status(403).send({
+          error: 'O provider WAHA é restrito ao super admin.',
+          code: 'WAHA_RESTRICTED',
+        })
+      }
 
       try {
         const number = await addNumber({

@@ -183,5 +183,20 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
   }
 }
 
+// ── Super admin (controle global da plataforma) ───────────────
+// Funciona nos dois modos de auth: via JWT (usuário com role SUPER_ADMIN) ou via
+// API key da conta ADMIN (admin-key). Centraliza a regra usada para bypass de
+// quota e visibilidade do provider WAHA.
+export function isSuperAdmin(request: FastifyRequest): boolean {
+  return request.authUser?.role === 'SUPER_ADMIN' || request.apiClient?.role === 'ADMIN'
+}
+
+// Guard: exige super admin (usar depois de authManage/authJwt).
+export async function requireSuperAdmin(request: FastifyRequest, reply: FastifyReply) {
+  if (!isSuperAdmin(request)) {
+    return reply.status(403).send({ error: 'Acesso restrito ao super admin' })
+  }
+}
+
 // Alias de compatibilidade com imports existentes
 export const authMiddleware = authAccount

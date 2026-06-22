@@ -17,7 +17,13 @@ export const QR_TTL_SECONDS = 45
 export class InstanceError extends Error {
   constructor(
     message: string,
-    public readonly code: 'NAME_TAKEN' | 'SLUG_TAKEN' | 'NOT_FOUND' | 'INVALID_SLUG',
+    public readonly code:
+      | 'NAME_TAKEN'
+      | 'SLUG_TAKEN'
+      | 'NOT_FOUND'
+      | 'INVALID_SLUG'
+      | 'QUOTA_EXCEEDED'
+      | 'WAHA_RESTRICTED',
   ) {
     super(message)
     this.name = 'InstanceError'
@@ -188,6 +194,23 @@ export function findInstanceByIdOrSlug(idOrSlug: string, apiClientId: string) {
   return prisma.instance.findFirst({
     where: { apiClientId, OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
   })
+}
+
+// Garante que a conta não excedeu a quota de instâncias. SUPER_ADMIN deve PULAR
+// esta checagem (não chamar). Lança InstanceError('QUOTA_EXCEEDED') [403].
+export async function assertInstanceQuota(apiClientId: string): Promise<void> {
+  const client = await prisma.apiClient.findUnique({
+    where: { id: apiClientId },
+    select: { maxInstances: true },
+  })
+  const max = client?.maxInstances ?? 1
+  const count = await prisma.instance.count({ where: { apiClientId } })
+  if (count >= max) {
+    throw new InstanceError(
+      `Limite de instâncias da conta atingido (${max}). Contate o administrador para aumentar.`,
+      'QUOTA_EXCEEDED',
+    )
+  }
 }
 
 // Cria a instância.

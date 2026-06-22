@@ -9,8 +9,8 @@
       <input type="text" name="name" placeholder="Nome (ex: Vendas-SP)" />
       <input type="text" name="slug" placeholder="Slug (ex: vendas-sp)" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" />
       <select name="provider">
-        <option value="WAHA">WAHA</option>
         <option value="EVOLUTION">Evolution</option>
+        <% if (it.isSuperAdmin) { %><option value="WAHA">WAHA (teste — super admin)</option><% } %>
         <option value="CLOUD_API">Cloud API</option>
       </select>
       <button type="submit" class="btn btn-primary">Criar</button>
