@@ -113,3 +113,43 @@ code { background: #f1f5f9; padding: 2px 6px; border-radius: 5px; font-size: 12p
 
 .qr-area { margin-top: 16px; }
 .qr-img { width: 240px; height: 240px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+
+/* Legenda de status (orientação operacional) */
+.legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin: 4px 0 16px; padding: 10px 12px;
+  background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 12px;
+}
+.legend-title { font-weight: 600; color: var(--text); margin-right: 4px; }
+
+/* Callout informativo (explicações para evitar erro operacional) */
+.callout {
+  display: flex; gap: 10px; padding: 12px 14px; border-radius: 8px;
+  background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a;
+  font-size: 13px; margin-bottom: 16px;
+}
+.callout .callout-icon { font-size: 16px; line-height: 1.3; }
+
+/* Envio de teste em linha (mais compacto/profissional) */
+.form-inline-send { display: grid; grid-template-columns: 220px 1fr auto; gap: 12px; align-items: end; }
+.form-inline-send .btn { height: 38px; }
+@media (max-width: 760px) { .form-inline-send { grid-template-columns: 1fr; } }
+
+/* Cabeçalho de página mais informativo */
+.page-head h1 { display: flex; align-items: center; gap: 10px; }
+.subtitle { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+
+/* Badges de papel (gestão) */
+.badge-role-SUPER_ADMIN { background: #fae8ff; color: #a21caf; }
+.badge-role-OWNER { background: #e0e7ff; color: var(--primary-dark); }
+.badge-role-MEMBER { background: #f1f5f9; color: var(--muted); }
+
+/* Stat chips (resumo numérico) */
+.stat-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.stat {
+  flex: 1; min-width: 120px; background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+}
+.stat .stat-num { font-size: 22px; font-weight: 700; }
+.stat .stat-label { color: var(--muted); font-size: 12px; }
