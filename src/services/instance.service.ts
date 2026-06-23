@@ -84,13 +84,13 @@ export async function generateUniqueSlug(base: string, ignoreId?: string): Promi
 export function toInstanceResponse(instance: Instance) {
   return {
     ...instance,
-    apiUrl: `${config.app.publicBaseUrl}/v1/instance/${instance.id}`,
+    apiUrl: `${config.app.apiPublicUrl}/v1/instance/${instance.id}`,
   }
 }
 
 // URL pública da API da instância (coluna "API URL" do painel).
 export function instanceApiUrl(instance: Pick<Instance, 'id'>): string {
-  return `${config.app.publicBaseUrl}/v1/instance/${instance.id}`
+  return `${config.app.apiPublicUrl}/v1/instance/${instance.id}`
 }
 
 // Mapeia o status do provider para o connectionState do banco.
