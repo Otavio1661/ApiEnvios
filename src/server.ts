@@ -19,6 +19,7 @@ import { instancesRoutes } from './routes/instances.route'
 import { adminRoutes } from './routes/admin.route'
 import { authRoutes } from './routes/auth.route'
 import { accountRoutes } from './routes/account.route'
+import { metricsRoutes } from './routes/metrics.route'
 import { panelRoutes } from './web/panel.route'
 // Garante a augmentação de tipos do Fastify/@fastify/jwt (apiClient/authUser/payload)
 import './types'
@@ -111,6 +112,7 @@ export function buildApp(): FastifyInstance {
   app.register(healthRoutes)
   app.register(authRoutes, { prefix: '/v1' })
   app.register(accountRoutes, { prefix: '/v1' })
+  app.register(metricsRoutes, { prefix: '/v1' })
   app.register(messagesRoutes, { prefix: '/v1' })
   app.register(instancesRoutes, { prefix: '/v1' })
   app.register(adminRoutes, { prefix: '/v1' })
