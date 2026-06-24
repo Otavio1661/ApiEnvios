@@ -1,6 +1,6 @@
 # Estado do Projeto — ApiEnvios
 
-> Documento de contexto consolidado. Última atualização: **2026-06-22**.
+> Documento de contexto consolidado. Última atualização: **2026-06-24**.
 > Serve para retomar o desenvolvimento sabendo exatamente o que existe, o que falta,
 > como o ambiente está montado e quais bugs ainda precisam ser resolvidos.
 > Complementa `CONTEXT.md` (fases 0–5) e `CONTEXT-fases-6-8.md` (fases 6–8).
@@ -44,6 +44,29 @@ Zod · Pino · Eta (painel server-rendered) + Alpine.js (CDN) · Vitest. Docker 
 - **Fase 6:** usuários + login JWT (criação só pelo admin). Modelo `User`, guards `authJwt`/`authManage`, rotas `/v1/auth/*` e `/v1/admin/*`, `provisioning.service.ts` compartilhado (REST + painel).
 - **Fase 7:** painel web server-rendered (`/admin`) — login, dashboard, detalhe da instância, QR via polling, envio de teste, logout, **e a tela admin-only `/admin/manage`** (gestão de contas/usuários).
 - **Fase 8:** testes Vitest — `buildApp()` extraído de `server.ts`; unitários + integração (`app.inject`, mock de prisma/redis). `tsc --noEmit` limpo; suíte verde.
+
+### Profissionalização (2026-06-24) — via skill `/time-pda`, tudo na `main`
+RBAC completo, gestão e melhorias de produto. Todas com `tsc` + suíte + E2E verdes.
+
+| Etapa | Entrega | Commit |
+|------|---------|--------|
+| Fase 1 | Teto anti-flood por destinatário (`ApiClient.maxPerRecipientPerHour`, 0=ilimitado); contador Redis Lua `rl:rcpt:<acc>:<phone>` 1h; bloqueio `429` na entrada de `POST /messages` | `c03d5ef` |
+| Fase 2 | CRUD super admin + desativar + **deleção em cascata** (`cascade-delete.service`); corrige bug de FK no `DELETE /instances`; `/v1/admin/clients|users|instances` | `986b2f4` |
+| Fase 3 | **RBAC por papel**: `Instance.ownerUserId`; MEMBER vê só as suas, OWNER vê todas e reatribui (`PATCH /instances/:id/owner`); self-service `/v1/account/users` (OWNER → só MEMBERs, anti-escalonamento). Guards `requireOwner`, `memberScopeId` | `0f660b0` |
+| Fase 4 | Painel: escopo MEMBER + gestão de contas (super admin) + página `/admin/team` (OWNER) + atribuição de dono + link "Time" | `d0ef2ce`, `b78c5a6` |
+| Fix | Apagar instância pelo painel + status de autenticação **derivado do pool** no dashboard | `6034556` |
+
+**Melhorias adicionais (mesma data):**
+- `cdd1b73` — API expõe `connection` (derivado do pool) em `GET /v1/instances[/:id]`.
+- `d7db9eb` — Webhooks robustos: fila `webhook-delivery` (retry/backoff + DLQ) + **assinatura HMAC** (`webhookSignature`).
+- `bea4ecf` — **Métricas por tenant**: `GET /v1/metrics` (totais/série diária via `$queryRaw` parametrizado/por instância/por número).
+- `08e91f5` — **Campanhas em lote**: `POST /v1/campaigns` (reusa teto + fila anti-ban, dedupe, idempotência).
+- `32f9cc9` — Observabilidade: `/health` rico (DB+Redis+version+uptime), log estruturado por tenant (hook `onResponse`), alerta `NUMBER_DISCONNECTED`.
+
+### Documentação por papel (2026-06-24)
+`/admin/docs` agora é **consciente do papel** (esconde o que não se aplica): comum (envio/campanhas/
+métricas/status), bloco OWNER (time/atribuir dono/webhooks+HMAC), bloco super admin (admin/cascata).
+README reescrito (matriz de permissões + referência de endpoints). Rota `/docs` passa `isOwner`/`isSuperAdmin`.
 
 ### Admin do painel via ambiente
 Usuário admin inicial criado pelo seed a partir de variáveis **opcionais**:

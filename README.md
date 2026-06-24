@@ -1,286 +1,174 @@
 # ApiEnvios
 
-API de envio de mensagens WhatsApp com **fallback automático entre 3 providers** e rotação de números para minimizar banimentos.
+Plataforma **multi-tenant** de envio de mensagens WhatsApp no modelo UltraMsg
+(Sistemas → ApiEnvios → usuários), com **pool de números por instância**, **fallback
+opt-in entre 3 providers**, mitigação de ban, painel web e API REST.
 
 ## Arquitetura
 
 ```
-Sistema Cliente
-      │
-      ▼
-  ApiEnvios API  ──── PostgreSQL (dados)
-      │           ──── Redis (filas/cache)
-      │
-   Fallback chain:
-      │
-      ├── 1️⃣  Evolution API  (principal, grátis)
-      │
-      ├── 2️⃣  WAHA           (fallback grátis)
-      │
-      └── 3️⃣  WhatsApp Cloud API  (fallback oficial/pago)
+Conta (ApiClient / tenant)
+  ├── Usuários (OWNER / MEMBER)         ── login JWT (painel/API)
+  └── Instâncias                        ── 1 "instância" = um POOL de números
+        └── Números (InstanceNumber)    ── cada número = 1 sessão real de provider
+              ├── 1️⃣ Evolution API   (principal)
+              ├── 2️⃣ WAHA            (fallback grátis)        ← opt-in por conta
+              └── 3️⃣ WhatsApp Cloud  (fallback oficial/pago)
 ```
 
-- Se o Provider 1 falhar ou o número for banido → tenta o Provider 2
-- Se o Provider 2 também falhar → cai no Provider 3 (oficial)
-- Ban detectado automaticamente → número marcado como BANNED + notificação webhook
+Você envia para a **instância** e o roteador escolhe automaticamente o melhor número
+**CONNECTED** (rodízio anti-ban). Ban detectado → número marcado `BANNED` + webhook.
+
+Stack: Node 20 · TypeScript · Fastify 4 · Prisma 5 (PostgreSQL 16) · Redis 7 + BullMQ ·
+Zod · Pino · Eta + Alpine.js (painel) · Vitest · Docker Compose.
 
 ---
 
-## Pré-requisitos
+## Papéis e acesso
 
-- [Node.js 20+](https://nodejs.org/)
-- [Docker + Docker Compose](https://docs.docker.com/compose/)
-- Git
+Há três formas de autenticar e três papéis humanos:
+
+| Autenticação | Header | Para quê |
+|---|---|---|
+| **Token de instância** | `Token: <token>` | Apps cliente enviando por uma instância específica |
+| **API key da conta** | `x-api-key: <chave>` | Gestão/multi-instância (escolhe a instância no corpo) |
+| **JWT (login humano)** | `Authorization: Bearer <jwt>` ou cookie no painel | Pessoas (painel/API), com papel |
+
+**Matriz de permissões (papel humano):**
+
+| Recurso | MEMBER | OWNER (dono da conta) | Super admin |
+|---|:---:|:---:|:---:|
+| Enviar / campanhas / status | ✅ (suas instâncias) | ✅ (conta) | ✅ (global) |
+| Ver instâncias | só as **dele** (`ownerUserId`) | todas da conta | todas |
+| Métricas (`/v1/metrics`) | das instâncias dele | da conta | da conta |
+| Criar/editar/excluir instância | suas | da conta | qualquer |
+| Atribuir dono de instância | ❌ | ✅ | ✅ |
+| Gerenciar membros (`/v1/account/users`) | ❌ | ✅ (só MEMBER) | ✅ |
+| Webhooks da conta | — | ✅ | ✅ |
+| Admin: contas/usuários/instâncias globais (`/v1/admin/*`) | ❌ | ❌ | ✅ |
+| Provider WAHA (teste) | ❌ | ❌ | ✅ |
+
+> A doc **dentro do painel** (`/admin/docs`) já mostra só as seções do papel logado.
 
 ---
 
-## Instalação e Setup (Desenvolvimento)
-
-### 1. Clone e instale dependências
+## Setup (desenvolvimento)
 
 ```bash
-git clone https://github.com/seu-usuario/ApiEnvios.git
-cd ApiEnvios
+git clone git@github.com:Otavio1661/ApiEnvios.git && cd ApiEnvios
 npm install
+cp .env.example .env          # configure DATABASE_URL, REDIS_*, EVOLUTION_*, JWT_SECRET, API_SECRET
+
+# Infra (Postgres, Redis, Evolution, WAHA)
+docker compose up -d postgres redis evolution_api waha
+
+npx prisma migrate deploy && npx prisma generate
+npm run db:seed               # cria o ApiClient ADMIN inicial (ver ADMIN_SEED_* no .env)
+npm run dev                   # sobe a API + painel
 ```
 
-### 2. Configure as variáveis de ambiente
-
-```bash
-cp .env.example .env
-```
-
-Edite o `.env` — no mínimo configure:
-```env
-DATABASE_URL="postgresql://apienvios:senha123@localhost:5432/apienvios"
-EVOLUTION_API_URL=http://localhost:8080
-EVOLUTION_API_KEY=evolution-key-dev-123
-```
-
-### 3. Suba o banco, Redis, Evolution API e WAHA
-
-```bash
-# Sobe APENAS a infraestrutura (sem a app — em dev, roda fora do Docker)
-docker compose up postgres redis evolution_api waha -d
-```
-
-Aguarde ~30 segundos para os serviços inicializarem. Verifique:
-```bash
-docker compose ps
-# Todos devem estar "healthy" ou "running"
-```
-
-### 4. Crie as tabelas no banco
-
-```bash
-npx prisma migrate dev --name init
-npx prisma generate
-```
-
-### 5. Popule com dados iniciais
-
-```bash
-npm run db:seed
-```
-
-Isso cria um **ApiClient de dev** com a key `dev-key-123456` e 2 números de exemplo.
-
-### 6. Inicie o servidor
-
-```bash
-npm run dev
-```
-
-O servidor sobe em `http://localhost:3000`.
+Em Docker, a API/painel sobem em **`http://localhost:3002`** (painel em `/admin`).
 
 ---
 
-## Endpoints
+## Painel web (`/admin`)
 
-Todos os endpoints autenticados precisam do header:
-```
-x-api-key: dev-key-123456
-```
+Login JWT (cookie httpOnly). Telas por papel:
+- **Instâncias** (dashboard) — status **derivado do pool** + apagar instância.
+- **Docs** — referência da API, já filtrada pelo papel.
+- **Time** (OWNER) — cria/edita/remove membros + atribui dono de instância.
+- **Gestão** (super admin) — contas (teto anti-flood, quota, ativar/desativar, apagar cascata), usuários e instâncias globais.
 
-### Healthcheck
-```
-GET /health
-```
+---
 
-### Enviar mensagem
-```bash
-POST /v1/messages
-Content-Type: application/json
-x-api-key: dev-key-123456
+## Endpoints (resumo)
 
-{
-  "to": "5544988880000",
-  "type": "TEXT",
-  "text": "Olá, mundo!"
-}
+### Envio (token de instância ou API key)
+```
+POST /v1/instance/:id/messages/chat     { to, body }
+POST /v1/instance/:id/messages/media    { to, type, mediaUrl, caption }
+POST /v1/messages                       { to, type, text|mediaUrl, instanceId?, scheduledAt? }
+POST /v1/campaigns                      { to:[...], text|mediaUrl, instanceId?, externalIdPrefix? }
+GET  /v1/messages/:id                   status da mensagem
+GET  /v1/messages?status=&page=&limit=  histórico
 ```
 
-Resposta:
-```json
-{
-  "id": "clxxxxx",
-  "status": "SENT",
-  "provider": "EVOLUTION",
-  "providerId": "BAE5..."
-}
+### Instâncias e números (API key / JWT, escopo por papel)
+```
+GET/POST/PATCH/DELETE /v1/instances[/:id]
+PATCH  /v1/instances/:id/owner          (OWNER) atribui dono
+POST   /v1/instances/:id/connect | GET .../qr | .../status
+.../numbers ...                         pool de números
+GET    /v1/instances/:id  →  inclui `connection` (status real derivado do pool)
 ```
 
-### Enviar imagem
-```json
-{
-  "to": "5544988880000",
-  "type": "IMAGE",
-  "mediaUrl": "https://exemplo.com/imagem.jpg",
-  "caption": "Confira nossa oferta!"
-}
+### Métricas, webhooks, conta
+```
+GET    /v1/metrics?days=30              totais/série/por instância/por número
+POST   /v1/webhooks                     { url, events[], secret? }   (assinatura HMAC)
+GET/POST/PATCH/DELETE /v1/account/users (OWNER) gerencia MEMBERs da própria conta
 ```
 
-### Envio agendado
-```json
-{
-  "to": "5544988880000",
-  "type": "TEXT",
-  "text": "Lembrete: sua consulta é amanhã!",
-  "scheduledAt": "2025-01-15T09:00:00-03:00"
-}
+### Admin (super admin)
+```
+GET/POST/PATCH/DELETE /v1/admin/clients[/:id]    contas (DELETE = cascata)
+POST/PATCH/DELETE      /v1/admin/users[/:id]      usuários de qualquer conta
+GET/DELETE             /v1/admin/instances[/:id]  instâncias globais (DELETE = cascata)
 ```
 
-### Ver status de mensagem
+### Health
 ```
-GET /v1/messages/:id
-```
-
-### Listar mensagens
-```
-GET /v1/messages?status=FAILED&page=1&limit=20
-```
-
-### Gerenciar números
-```bash
-# Listar
-GET /v1/numbers
-
-# Cadastrar novo número
-POST /v1/numbers
-{ "phone": "5544999990003", "provider": "EVOLUTION", "instanceId": "instancia-02", "priority": 0 }
-
-# Ver estatísticas
-GET /v1/numbers/stats
-
-# Rotacionar número manualmente
-POST /v1/numbers/:id/rotate
-
-# Mudar status
-PATCH /v1/numbers/:id/status
-{ "status": "SUSPENDED" }
-```
-
-### Webhooks de notificação
-```bash
-# Cadastrar webhook para ser notificado de bans
-POST /v1/webhooks
-{
-  "url": "https://meu-sistema.com/webhooks/whatsapp",
-  "events": ["BAN_DETECTED", "MESSAGE_FAILED", "NUMBER_ROTATED"]
-}
-```
-
-Payload enviado ao seu webhook:
-```json
-{
-  "event": "BAN_DETECTED",
-  "timestamp": "2025-01-15T14:30:00.000Z",
-  "data": {
-    "phone": "5544999990001",
-    "provider": "EVOLUTION",
-    "reason": "Stream Errored (515)",
-    "bannedAt": "2025-01-15T14:30:00.000Z"
-  }
-}
+GET /health   → { status, version, uptimeSec, checks:{database,redis} }   (200/503)
 ```
 
 ---
 
-## Estrutura do Projeto
+## Webhooks (eventos + HMAC)
 
+Eventos: `BAN_DETECTED`, `NUMBER_DISCONNECTED`, `NUMBER_ROTATED`, `MESSAGE_FAILED`,
+`MESSAGE_DELIVERED`, `PROVIDER_DOWN`.
+
+Entrega assíncrona com **retry/backoff** (BullMQ) e **DLQ** (jobs esgotados ficam no
+conjunto `failed`). Com `secret`, cada POST leva:
 ```
-ApiEnvios/
-├── src/
-│   ├── config/          # Variáveis de ambiente centralizadas
-│   ├── providers/       # Implementação de cada provider
-│   │   ├── evolution.provider.ts
-│   │   ├── waha.provider.ts
-│   │   └── cloudapi.provider.ts
-│   ├── services/        # Lógica de negócio
-│   │   ├── provider-router.service.ts  # Fallback automático
-│   │   └── notification.service.ts     # Alertas de ban
-│   ├── routes/          # Endpoints da API
-│   ├── middlewares/     # Auth, rate limit
-│   ├── jobs/            # Tarefas agendadas
-│   ├── utils/           # Prisma, Redis, helpers
-│   └── types/           # Tipos TypeScript
-├── prisma/
-│   ├── schema.prisma    # Modelos do banco
-│   └── seed.ts          # Dados iniciais
-├── docker/
-│   └── Dockerfile.dev
-├── docker-compose.yml   # Infra completa
-└── .env.example
+X-ApiEnvios-Event:     <evento>
+X-ApiEnvios-Timestamp: <epoch ms>
+X-ApiEnvios-Signature: sha256=<HMAC-SHA256 de "<timestamp>.<body>">
 ```
+Valide recomputando o HMAC com o seu segredo sobre `${timestamp}.${rawBody}`.
 
 ---
 
-## Banco de Dados
+## Anti-ban e anti-flood
 
-**PostgreSQL** via Prisma ORM. Tabelas principais:
+- **Espaçamento anti-ban** por instância (lock + atraso aleatório no Redis).
+- **Teto por destinatário/hora** por conta (`ApiClient.maxPerRecipientPerHour`, `0` = ilimitado)
+  → estouro responde `429 Retry-After`, sem enfileirar.
+- Warm-up de números novos, rotação automática em ban, limite diário por número.
+
+`.env`: `SEND_DELAY_MIN`, `SEND_DELAY_MAX`, `MAX_MESSAGES_PER_NUMBER_DAY`.
+
+---
+
+## Banco de dados (Prisma / PostgreSQL)
 
 | Tabela | Descrição |
 |--------|-----------|
-| `WhatsappNumber` | Números cadastrados com status, provider e contadores diários |
-| `Message` | Todas as mensagens com status de entrega |
-| `MessageAttempt` | Histórico de cada tentativa (qual provider, erro, duração) |
-| `NumberRotation` | Log de rotações de número (ban, limite, manual) |
-| `ApiClient` | Clientes que consomem a API (multi-tenant) |
-| `Webhook` | URLs para notificações de eventos |
+| `ApiClient` | Conta (tenant): apiKey, role, rateLimit, maxInstances, **maxPerRecipientPerHour** |
+| `User` | Usuário humano (OWNER / MEMBER / SUPER_ADMIN), login JWT |
+| `Instance` | Pool de números; `token`, `ownerUserId` (dono), `connectionState` (legado) |
+| `InstanceNumber` | Número/sessão real de provider sob a instância (fonte de verdade do envio) |
+| `Message` / `MessageAttempt` | Mensagens e histórico de tentativas/fallback |
+| `NumberRotation` | Log de rotações (ban/limite/manual) |
+| `Webhook` | URLs + eventos + `secret` (HMAC) |
 
-### Visualizar banco
+`npm run db:studio` abre o Prisma Studio.
+
+---
+
+## Testes
+
 ```bash
-npm run db:studio
-# Abre o Prisma Studio em http://localhost:5555
+npm test          # vitest (unit + integração)
+npx tsc --noEmit  # type-check
 ```
-
----
-
-## Anti-ban: Configurações importantes
-
-No `.env`:
-```env
-# Delay entre mensagens (ms) — varie para parecer humano
-SEND_DELAY_MIN=2000
-SEND_DELAY_MAX=5000
-
-# Limite diário por número antes de rotacionar automaticamente
-MAX_MESSAGES_PER_NUMBER_DAY=200
-```
-
-Boas práticas:
-- Registre apenas números que já conversaram com o destinatário antes
-- Faça warm-up: comece com poucos envios e aumente gradualmente
-- Use o status `WARMING` para números novos
-- Monitore o webhook `BAN_DETECTED` e troque o número imediatamente
-
----
-
-## Próximos passos
-
-- [ ] Fila BullMQ para envio assíncrono em volume
-- [ ] Cron para reset diário de contadores (meia-noite)
-- [ ] Endpoint para conectar instância via QR Code
-- [ ] Dashboard de monitoramento
-- [ ] Rate limiting por ApiClient
-- [ ] Autenticação JWT para admin

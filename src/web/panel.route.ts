@@ -327,9 +327,9 @@ export async function panelRoutes(app: FastifyInstance) {
 
   // ── GET /docs — Documentação da API (exemplos JS/PHP/cURL) ─────
   app.get('/docs', { preHandler: requirePanelAuth }, async (request, reply) => {
-    // Usa uma instância real da conta (se houver) para os exemplos ficarem
-    // copy-paste prontos com id/slug/token de verdade; senão, placeholders.
-    const list = await listInstances(request.apiClient!.id)
+    // Usa uma instância real visível ao usuário (MEMBER vê só as suas) para os
+    // exemplos ficarem copy-paste prontos com id/slug/token de verdade.
+    const list = await listInstances(request.apiClient!.id, memberScopeId(request))
     const first = list[0]
     const sample = first
       ? { id: first.id, slug: first.slug, token: first.token }
@@ -343,8 +343,11 @@ export async function panelRoutes(app: FastifyInstance) {
         apiBase: config.app.apiPublicUrl,
         apiKey: request.apiClient!.apiKey,
         sample,
+        // Papel do usuário → controla quais seções aparecem (esconde o que não se aplica).
+        isSuperAdmin: isSuperAdmin(request),
+        isOwner: isPanelOwner(request),
       },
-      { user: request.authUser, isAdmin: isSuperAdmin(request), activeNav: 'docs' },
+      { user: request.authUser, isAdmin: isSuperAdmin(request), isOwner: isPanelOwner(request), activeNav: 'docs' },
     )
   })
 

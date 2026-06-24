@@ -129,6 +129,133 @@ echo $response; // {"id":"...","status":"QUEUED"}</code></pre>
   <p class="muted" style="margin-top:8px">Estados: <code>QUEUED</code> → <code>SENDING</code> → <code>SENT</code> → <code>DELIVERED</code> → <code>READ</code> (ou <code>FAILED</code>).</p>
 </div>
 
+<!-- Campanhas em lote (comum) -->
+<div class="card">
+  <h2>Campanhas — envio em lote</h2>
+  <p class="muted"><code>POST <%= it.apiBase %>/v1/campaigns</code> · envia a mesma mensagem para uma lista (até 1000 destinos). Respeita o limite por destinatário e o espaçamento anti-ban automaticamente.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/campaigns" \
+  -H "x-api-key: <%= it.apiKey %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":["5544999990000","5544999990001"],"text":"Promoção!","instanceId":"<%= it.sample.id %>","externalIdPrefix":"promo-jun"}'</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px">Resposta <code>202 { total, queued, rateLimited, duplicates, results[] }</code>. Use <code>externalIdPrefix</code> para idempotência (reexecutar não duplica envios).</p>
+</div>
+
+<!-- Métricas (comum) -->
+<div class="card">
+  <h2>Métricas de uso</h2>
+  <p class="muted"><code>GET <%= it.apiBase %>/v1/metrics?days=30</code> · totais por status, série diária, por instância e por número. (Um usuário comum vê só as métricas das instâncias dele.)</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl "<%= it.apiBase %>/v1/metrics?days=30" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+  </div>
+</div>
+
+<!-- Limite anti-flood (comum, informativo) -->
+<div class="callout">
+  <span class="callout-icon">🛡️</span>
+  <div>
+    <strong>Proteção anti-flood:</strong> cada conta tem um teto de mensagens por hora para o <strong>mesmo número de destino</strong> (configurável pelo super admin; <code>0</code> = ilimitado). Ao estourar, a API responde <code>429</code> com <code>Retry-After</code> — sem enfileirar nem cobrar o envio.
+  </div>
+</div>
+
+<% if (it.isOwner) { %>
+<!-- ════ Seção do DONO DA CONTA (OWNER) ════ -->
+<hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
+<h2>Gestão da conta (dono)</h2>
+<p class="muted">Endpoints disponíveis para o dono da conta (login de administrador da conta).</p>
+
+<div class="card">
+  <h3>Gerenciar membros do time</h3>
+  <p class="muted">O dono cria/edita/remove os <strong>usuários (membros)</strong> da própria conta. Membros enxergam apenas as instâncias atribuídas a eles.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code># Listar membros
+curl "<%= it.apiBase %>/v1/account/users" -H "Authorization: Bearer SEU_JWT"
+
+# Criar membro (papel sempre MEMBER)
+curl -X POST "<%= it.apiBase %>/v1/account/users" -H "Authorization: Bearer SEU_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"membro@empresa.com","password":"senha-forte","name":"Fulano"}'
+
+# Editar (nome/senha) e remover
+curl -X PATCH  "<%= it.apiBase %>/v1/account/users/USER_ID" -H "Authorization: Bearer SEU_JWT" -H "Content-Type: application/json" -d '{"name":"Novo Nome"}'
+curl -X DELETE "<%= it.apiBase %>/v1/account/users/USER_ID" -H "Authorization: Bearer SEU_JWT"</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px">Também dá para gerenciar pela tela <a href="/admin/team">Time</a>.</p>
+</div>
+
+<div class="card">
+  <h3>Atribuir dono de instância</h3>
+  <p class="muted"><code>PATCH <%= it.apiBase %>/v1/instances/:id/owner</code> · define qual membro é dono da instância (ou <code>null</code> para nível de conta).</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X PATCH "<%= it.apiBase %>/v1/instances/<%= it.sample.id %>/owner" \
+  -H "Authorization: Bearer SEU_JWT" -H "Content-Type: application/json" \
+  -d '{"ownerUserId":"USER_ID"}'</code></pre>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Webhooks (eventos) + verificação HMAC</h3>
+  <p class="muted">Receba eventos (<code>BAN_DETECTED</code>, <code>NUMBER_DISCONNECTED</code>, <code>NUMBER_ROTATED</code>, <code>MESSAGE_FAILED</code>...). Com <code>secret</code>, cada entrega é assinada (retry automático + DLQ).</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code># Cadastrar webhook com segredo
+curl -X POST "<%= it.apiBase %>/v1/webhooks" -H "x-api-key: <%= it.apiKey %>" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://seu-sistema.com/hook","events":["BAN_DETECTED","NUMBER_DISCONNECTED"],"secret":"UM_SEGREDO_FORTE"}'</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px">Verificação da assinatura no seu receptor (Node):</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>import { createHmac } from "crypto";
+// rawBody = corpo cru da requisição (string), headers do POST do webhook
+const ts  = headers["x-apienvios-timestamp"];
+const sig = headers["x-apienvios-signature"]; // "sha256=..."
+const esperado = "sha256=" + createHmac("sha256", SECRET).update(`${ts}.${rawBody}`).digest("hex");
+const valido = sig === esperado; // rejeite se false</code></pre>
+  </div>
+</div>
+<% } %>
+
+<% if (it.isSuperAdmin) { %>
+<!-- ════ Seção do SUPER ADMIN (plataforma) ════ -->
+<hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
+<h2>Administração da plataforma (super admin)</h2>
+<p class="muted">Controle global de contas, usuários e instâncias.</p>
+
+<div class="card">
+  <h3>Contas (tenants)</h3>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code># Listar / criar / editar / apagar (cascata) contas
+curl "<%= it.apiBase %>/v1/admin/clients" -H "x-api-key: <%= it.apiKey %>"
+curl -X POST  "<%= it.apiBase %>/v1/admin/clients" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"name":"Nova Conta","role":"CLIENT","maxPerRecipientPerHour":10}'
+curl -X PATCH "<%= it.apiBase %>/v1/admin/clients/ACC_ID" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"active":false,"maxInstances":3}'
+curl -X DELETE "<%= it.apiBase %>/v1/admin/clients/ACC_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px">⚠️ <code>DELETE</code> apaga em cascata (instâncias, números, mensagens, usuários). Irreversível.</p>
+</div>
+
+<div class="card">
+  <h3>Usuários e instâncias (global)</h3>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code># Usuários de qualquer conta
+curl -X POST  "<%= it.apiBase %>/v1/admin/users" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"apiClientId":"ACC_ID","email":"a@b.com","password":"senha-forte","role":"OWNER"}'
+curl -X PATCH "<%= it.apiBase %>/v1/admin/users/USER_ID" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"role":"MEMBER"}'
+
+# Todas as instâncias da plataforma + apagar qualquer uma (cascata)
+curl "<%= it.apiBase %>/v1/admin/instances" -H "x-api-key: <%= it.apiKey %>"
+curl -X DELETE "<%= it.apiBase %>/v1/admin/instances/INST_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px">Tudo isso também está na tela <a href="/admin/manage">Gestão</a>. O provider <strong>WAHA</strong> (teste) é restrito ao super admin.</p>
+</div>
+<% } %>
+
 <!-- Insomnia / Postman -->
 <div class="card">
   <h2>Insomnia / Postman</h2>
