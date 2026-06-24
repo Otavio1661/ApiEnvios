@@ -33,6 +33,8 @@ export interface CreateClientInput {
   rateLimit: number
   // Opcional: ausente ⇒ usa o default do schema (1).
   maxInstances?: number
+  // Opcional: teto de mensagens/hora para o mesmo destino. Ausente ⇒ default do schema (10). 0 = ilimitado.
+  maxPerRecipientPerHour?: number
   // Opcional: cria também o usuário OWNER vinculado à conta criada.
   ownerEmail?: string
   ownerPassword?: string
@@ -149,6 +151,7 @@ export function listClients() {
       active: true,
       fallbackEnabled: true,
       rateLimit: true,
+      maxPerRecipientPerHour: true,
       maxInstances: true,
       totalSent: true,
       createdAt: true,

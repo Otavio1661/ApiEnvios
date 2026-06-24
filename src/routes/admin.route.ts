@@ -21,6 +21,8 @@ const createClientSchema = z.object({
   role: z.enum(['ADMIN', 'CLIENT']).default('CLIENT'),
   fallbackEnabled: z.boolean().default(false),
   rateLimit: z.number().int().positive().default(100),
+  // Teto de mensagens/hora para o mesmo destino (anti-flood). 0 = ilimitado.
+  maxPerRecipientPerHour: z.number().int().min(0).optional(),
   // Opcional: cria também o usuário OWNER vinculado à conta criada.
   ownerEmail: z.string().email().optional(),
   ownerPassword: z.string().min(8).optional(),
@@ -58,6 +60,7 @@ export async function adminRoutes(app: FastifyInstance) {
           apiKey: client.apiKey,
           fallbackEnabled: client.fallbackEnabled,
           rateLimit: client.rateLimit,
+          maxPerRecipientPerHour: client.maxPerRecipientPerHour,
           active: client.active,
           createdAt: client.createdAt,
           ...(owner ? { owner } : {}),

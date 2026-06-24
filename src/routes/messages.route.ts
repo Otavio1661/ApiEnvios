@@ -5,6 +5,7 @@ import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { enqueueSend, requeueSend, removeSendJob } from '../queues/send-message.queue'
 import { normalizePhone } from '../utils/helpers'
+import { checkRecipientHourlyLimit } from '../utils/recipient-rate-limit'
 
 const sendSchema = z.object({
   to: z.string().min(10).max(15),
@@ -54,6 +55,31 @@ export async function messagesRoutes(app: FastifyInstance) {
         }
 
         const isScheduled = Boolean(payload.scheduledAt)
+
+        // Limite anti-flood por destinatário (por conta, janela de 1h). Aplica só a
+        // envios imediatos — agendados são contados quando forem efetivamente enviados.
+        // Bloqueia ANTES de criar a Message e o job, para não entupir banco nem fila.
+        if (!isScheduled) {
+          const limit = await checkRecipientHourlyLimit(
+            apiClientId,
+            to,
+            request.apiClient!.maxPerRecipientPerHour,
+          )
+          if (!limit.allowed) {
+            request.log.warn(
+              `[Messages] Limite por destinatário atingido: conta=${apiClientId} to=${to} limite=${limit.limit}/h`,
+            )
+            return reply
+              .status(429)
+              .header('Retry-After', String(limit.retryAfterSec))
+              .send({
+                error: `Limite de ${limit.limit} mensagem(ns) por hora para o mesmo número atingido`,
+                to,
+                limit: limit.limit,
+                retryAfterSec: limit.retryAfterSec,
+              })
+          }
+        }
 
         // Cria registro no banco (QUEUED ou SCHEDULED)
         const message = await prisma.message.create({

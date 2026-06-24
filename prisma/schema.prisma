@@ -226,6 +226,10 @@ model ApiClient {
   // Rate limiting por cliente
   rateLimit   Int      @default(100)    // req/min
 
+  // Teto de mensagens para o MESMO número de destino por hora (anti-flood/spam),
+  // contado por conta somando todas as instâncias. 0 = ilimitado. Editável pelo super admin.
+  maxPerRecipientPerHour Int @default(10)
+
   // Quota de instâncias (pools) que a conta pode criar. SUPER_ADMIN ignora.
   maxInstances Int     @default(1)
 
