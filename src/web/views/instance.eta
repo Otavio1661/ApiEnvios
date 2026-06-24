@@ -30,6 +30,27 @@
   </form>
 </div>
 
+<% if (it.canAssignOwner) { %>
+<div class="card">
+  <h2>Dono da instância</h2>
+  <p class="muted">Atribua esta instância a um membro da conta — ele passa a vê-la e gerenciá-la. Sem dono, a instância fica visível apenas para os administradores da conta.</p>
+  <form method="POST" action="/admin/instances/<%= it.instance.id %>/owner" class="form">
+    <label class="field">
+      <span>Dono</span>
+      <select name="ownerUserId">
+        <option value="">— Sem dono (nível da conta) —</option>
+        <% it.members.forEach(function(m){ %>
+          <option value="<%= m.id %>" <%= it.instance.ownerUserId === m.id ? 'selected' : '' %>>
+            <%= (m.name || m.email) %> (<%= m.role === 'OWNER' ? 'Admin' : 'Usuário' %>)
+          </option>
+        <% }) %>
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary">Salvar dono</button>
+  </form>
+</div>
+<% } %>
+
 <div class="card">
   <div class="page-head">
     <h2>Números do pool</h2>

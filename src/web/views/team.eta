@@ -1,0 +1,76 @@
+<div class="page-head">
+  <div>
+    <a href="/admin" class="muted">&larr; Voltar</a>
+    <h1>Meu time</h1>
+    <p class="muted">Crie e administre os usuários (membros) da sua conta. Cada membro vê apenas as instâncias atribuídas a ele.</p>
+  </div>
+</div>
+
+<% if (it.ok) { %>
+  <div class="alert alert-ok"><%= it.ok %></div>
+<% } %>
+<% if (it.err) { %>
+  <div class="alert alert-error"><%= it.err %></div>
+<% } %>
+
+<div class="card">
+  <h2>Novo membro</h2>
+  <form method="POST" action="/admin/team/users" class="form">
+    <label class="field">
+      <span>E-mail *</span>
+      <input type="email" name="email" placeholder="membro@empresa.com" required />
+    </label>
+    <label class="field">
+      <span>Senha (mín. 8) *</span>
+      <input type="password" name="password" minlength="8" required autocomplete="new-password" />
+    </label>
+    <label class="field">
+      <span>Nome</span>
+      <input type="text" name="name" placeholder="Nome completo" />
+    </label>
+    <button type="submit" class="btn btn-primary">Adicionar membro</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Usuários da conta (<%= it.users.length %>)</h2>
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>E-mail</th>
+        <th>Nome</th>
+        <th>Papel</th>
+        <th>Criado em</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (it.users.length === 0) { %>
+        <tr><td colspan="5" class="muted center">Nenhum usuário ainda.</td></tr>
+      <% } %>
+      <% it.users.forEach(function(u){ %>
+        <tr>
+          <td><%= u.email %><% if (u.id === it.user.id) { %> <span class="muted">(você)</span><% } %></td>
+          <td><%= u.name || '—' %></td>
+          <td><span class="badge badge-msg"><%= u.role === 'SUPER_ADMIN' ? 'Super Admin' : (u.role === 'OWNER' ? 'Admin' : 'Usuário') %></span></td>
+          <td><%= new Date(u.createdAt).toLocaleString('pt-BR') %></td>
+          <td>
+            <% if (u.role === 'MEMBER') { %>
+              <form method="POST" action="/admin/team/users/<%= u.id %>/edit" class="inline" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+                <input type="text" name="name" value="<%= u.name || '' %>" placeholder="Nome" style="width:120px" />
+                <input type="password" name="password" placeholder="Nova senha (opcional)" minlength="8" autocomplete="new-password" style="width:150px" />
+                <button type="submit" class="btn btn-ghost">Salvar</button>
+              </form>
+              <form method="POST" action="/admin/team/users/<%= u.id %>/delete" class="inline"
+                    onsubmit="return confirm('Remover o membro <%= u.email %>?')">
+                <button type="submit" class="btn btn-ghost btn-danger">Remover</button>
+              </form>
+            <% } else { %>
+              <span class="muted">—</span>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

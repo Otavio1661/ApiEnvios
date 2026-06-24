@@ -15,6 +15,7 @@ import {
   findInstanceByIdOrSlug,
   createInstance,
   updateInstance,
+  assignInstanceOwner,
   connectInstance,
   syncInstanceStatus,
   refreshQr,
@@ -39,6 +40,7 @@ import {
   listUsers,
   deleteUser,
   updateClient,
+  updateUser,
 } from '../services/provisioning.service'
 import { deleteClientCascade } from '../services/cascade-delete.service'
 
@@ -116,6 +118,26 @@ async function requirePanelAdmin(request: FastifyRequest, reply: FastifyReply) {
   }
 }
 
+// ── preHandler owner-only do painel ───────────────────────────
+// Estende requirePanelAuth: além de sessão válida, exige papel OWNER (dono da
+// conta) ou SUPER_ADMIN. MEMBER → redirect /admin com aviso (navegação).
+async function requirePanelOwner(request: FastifyRequest, reply: FastifyReply) {
+  await requirePanelAuth(request, reply)
+  if (reply.sent) return
+  if (!isPanelOwner(request)) {
+    return reply.redirect(
+      `/admin?err=${encodeURIComponent('Acesso restrito ao dono da conta.')}`,
+    )
+  }
+}
+
+// True quando o usuário do painel é OWNER (dono) ou SUPER_ADMIN — pode gerenciar
+// o time da conta e (re)atribuir donos de instância.
+function isPanelOwner(request: FastifyRequest): boolean {
+  const role = request.authUser?.role
+  return role === 'OWNER' || role === 'SUPER_ADMIN'
+}
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
@@ -157,6 +179,28 @@ const manageQuotaSchema = z.object({
 // Atualização do teto anti-flood por destinatário (Fase 1) — só super admin. 0 = ilimitado.
 const manageLimitSchema = z.object({
   maxPerRecipientPerHour: z.coerce.number().int().min(0),
+})
+
+// Time (OWNER): criar membro da própria conta (papel sempre MEMBER).
+const teamMemberSchema = z.object({
+  email: z.string().email('E-mail inválido.'),
+  password: z.string().min(8, 'A senha deve ter ao menos 8 caracteres.'),
+  name: z.string().optional(),
+})
+
+// Time (OWNER): editar membro (nome e/ou nova senha; ao menos um).
+const teamEditSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    password: z.string().min(8).optional(),
+  })
+  .refine((d) => d.name !== undefined || d.password !== undefined, {
+    message: 'Informe um novo nome ou uma nova senha.',
+  })
+
+// Atribuição de dono de instância (OWNER): id do membro, ou vazio para remover o dono.
+const assignOwnerSchema = z.object({
+  ownerUserId: z.string().min(1).nullable(),
 })
 
 // Normaliza valores de formulário HTML: strings vazias → undefined; checkbox → boolean.
@@ -271,7 +315,7 @@ export async function panelRoutes(app: FastifyInstance) {
           isSuperAdmin: isSuperAdmin(request),
           pageError: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
-        { user: request.authUser, isAdmin, activeNav: 'instances' },
+        { user: request.authUser, isAdmin, isOwner: isPanelOwner(request), activeNav: 'instances' },
       )
     },
   )
@@ -403,6 +447,12 @@ export async function panelRoutes(app: FastifyInstance) {
       const numbers = await listNumbers(instance.id)
       const sentTodayTotal = numbers.reduce((acc, n) => acc + n.sentToday, 0)
 
+      // Atribuição de dono (só OWNER): lista membros atribuíveis (OWNER/MEMBER da conta).
+      const canAssignOwner = isPanelOwner(request)
+      const members = canAssignOwner
+        ? (await listUsers(request.apiClient!.id)).filter((u) => u.role !== 'SUPER_ADMIN')
+        : []
+
       return renderPage(
         app,
         reply,
@@ -415,11 +465,13 @@ export async function panelRoutes(app: FastifyInstance) {
           sentTodayTotal,
           apiBase: config.app.apiPublicUrl,
           isSuperAdmin: isSuperAdmin(request),
+          canAssignOwner,
+          members,
           sent: request.query.sent === '1',
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           sendError: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
-        { user: request.authUser, isAdmin: isSuperAdmin(request), activeNav: 'instances' },
+        { user: request.authUser, isAdmin: isSuperAdmin(request), isOwner: canAssignOwner, activeNav: 'instances' },
       )
     },
   )
@@ -998,6 +1050,136 @@ export async function panelRoutes(app: FastifyInstance) {
         // Degrada graciosamente para o painel: devolve o estado conhecido (sem 502 ruidoso).
         return reply.send({ connectionState: instance.connectionState, stale: true })
       }
+    },
+  )
+
+  // ══════════════════════════════════════════════════════════
+  // OWNER — atribuição de dono de instância + gestão de time
+  // (expõe a Fase 3 no painel). Guard: requirePanelOwner.
+  // ══════════════════════════════════════════════════════════
+
+  // ── POST /instances/:id/owner — (Re)atribui o dono da instância ─
+  app.post<{ Params: { id: string } }>(
+    '/instances/:id/owner',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      // OWNER enxerga todas as da conta — sem escopo de membro aqui.
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!instance) return reply.redirect('/admin')
+
+      const raw = (request.body ?? {}) as Record<string, unknown>
+      const parsed = assignOwnerSchema.safeParse({ ownerUserId: emptyToUndefined(raw.ownerUserId) ?? null })
+      if (!parsed.success) {
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Dono inválido.')}`)
+      }
+
+      try {
+        await assignInstanceOwner({
+          instanceId: instance.id,
+          apiClientId: request.apiClient!.id,
+          ownerUserId: parsed.data.ownerUserId,
+        })
+        return reply.redirect(`/admin/instances/${instance.id}?ok=${encodeURIComponent('Dono da instância atualizado.')}`)
+      } catch (err: any) {
+        if (err instanceof InstanceError) {
+          return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent(err.message)}`)
+        }
+        request.log.error(`[Painel] Falha ao atribuir dono: ${err.message}`)
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao atribuir o dono.')}`)
+      }
+    },
+  )
+
+  // ── GET /team — Gestão de time da própria conta (OWNER) ────
+  app.get<{ Querystring: { ok?: string; err?: string } }>(
+    '/team',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      const users = await listUsers(request.apiClient!.id)
+      return renderPage(
+        app,
+        reply,
+        'team',
+        {
+          title: 'Meu time — ApiEnvios',
+          user: request.authUser,
+          users,
+          ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
+          err: request.query.err ? decodeURIComponent(request.query.err) : null,
+        },
+        { user: request.authUser, isAdmin: isSuperAdmin(request), isOwner: true, activeNav: 'team' },
+      )
+    },
+  )
+
+  // ── POST /team/users — Cria um MEMBER na própria conta ─────
+  app.post('/team/users', { preHandler: requirePanelOwner }, async (request, reply) => {
+    const raw = (request.body ?? {}) as Record<string, unknown>
+    const parsed = teamMemberSchema.safeParse({
+      email: raw.email,
+      password: raw.password,
+      name: emptyToUndefined(raw.name),
+    })
+    if (!parsed.success) {
+      const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
+      return reply.redirect(`/admin/team?err=${encodeURIComponent(msg)}`)
+    }
+    try {
+      await createUserForClient({
+        apiClientId: request.apiClient!.id,
+        email: parsed.data.email,
+        password: parsed.data.password,
+        name: parsed.data.name,
+        role: 'MEMBER', // TRAVADO: OWNER não cria OWNER/SUPER_ADMIN.
+      })
+      return reply.redirect(`/admin/team?ok=${encodeURIComponent('Membro adicionado.')}`)
+    } catch (err: any) {
+      if (err instanceof ProvisioningError && err.code === 'EMAIL_TAKEN') {
+        return reply.redirect(`/admin/team?err=${encodeURIComponent('E-mail já cadastrado.')}`)
+      }
+      request.log.error(`[Painel] Falha ao criar membro: ${err.message}`)
+      return reply.redirect(`/admin/team?err=${encodeURIComponent('Falha ao criar o membro.')}`)
+    }
+  })
+
+  // ── POST /team/users/:id/edit — Edita um MEMBER da própria conta ─
+  app.post<{ Params: { id: string } }>(
+    '/team/users/:id/edit',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      const raw = (request.body ?? {}) as Record<string, unknown>
+      const parsed = teamEditSchema.safeParse({
+        name: emptyToUndefined(raw.name),
+        password: emptyToUndefined(raw.password),
+      })
+      if (!parsed.success) {
+        return reply.redirect(`/admin/team?err=${encodeURIComponent('Informe um novo nome ou senha.')}`)
+      }
+      // Alvo precisa ser MEMBER da PRÓPRIA conta (anti-escalonamento / cross-tenant).
+      const target = await prisma.user.findFirst({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id, role: 'MEMBER' },
+        select: { id: true },
+      })
+      if (!target) return reply.redirect(`/admin/team?err=${encodeURIComponent('Membro não encontrado.')}`)
+
+      await updateUser(target.id, { name: parsed.data.name, password: parsed.data.password })
+      return reply.redirect(`/admin/team?ok=${encodeURIComponent('Membro atualizado.')}`)
+    },
+  )
+
+  // ── POST /team/users/:id/delete — Apaga um MEMBER da própria conta ─
+  app.post<{ Params: { id: string } }>(
+    '/team/users/:id/delete',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      const target = await prisma.user.findFirst({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id, role: 'MEMBER' },
+        select: { id: true },
+      })
+      if (!target) return reply.redirect(`/admin/team?err=${encodeURIComponent('Membro não encontrado.')}`)
+
+      await deleteUser(target.id)
+      return reply.redirect(`/admin/team?ok=${encodeURIComponent('Membro removido.')}`)
     },
   )
 }
