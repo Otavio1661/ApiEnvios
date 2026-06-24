@@ -6,7 +6,7 @@
 // src/services/provisioning.service.ts e é compartilhada com o painel web admin.
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { authAccount, requireAdmin } from '../middlewares/auth.middleware'
+import { authAccount, requireAdmin, authManage, requireSuperAdmin } from '../middlewares/auth.middleware'
 import {
   ProvisioningError,
   createClientWithOwner,
@@ -14,7 +14,11 @@ import {
   listClients,
   listUsers,
   deleteUser,
+  updateClient,
+  updateUser,
 } from '../services/provisioning.service'
+import { deleteClientCascade, deleteInstanceCascade } from '../services/cascade-delete.service'
+import { listAllInstances } from '../services/instance.service'
 
 const createClientSchema = z.object({
   name: z.string().min(1),
@@ -40,6 +44,28 @@ const createUserSchema = z.object({
   name: z.string().optional(),
   role: z.enum(['OWNER', 'MEMBER']).default('OWNER'),
 })
+
+// Edição de conta (super admin): todos os campos opcionais; ao menos um obrigatório.
+const updateClientSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    role: z.enum(['ADMIN', 'CLIENT']).optional(),
+    rateLimit: z.number().int().positive().optional(),
+    maxInstances: z.number().int().min(0).optional(),
+    maxPerRecipientPerHour: z.number().int().min(0).optional(),
+    fallbackEnabled: z.boolean().optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: 'Informe ao menos um campo para atualizar' })
+
+// Edição de usuário (super admin): nome, papel e/ou redefinição de senha.
+const updateUserSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    role: z.enum(['OWNER', 'MEMBER', 'SUPER_ADMIN']).optional(),
+    password: z.string().min(8).optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: 'Informe ao menos um campo para atualizar' })
 
 export async function adminRoutes(app: FastifyInstance) {
   // ── POST /admin/clients — Cria um tenant (e, opcionalmente, o OWNER) ─
@@ -131,6 +157,104 @@ export async function adminRoutes(app: FastifyInstance) {
       const removed = await deleteUser(request.params.id)
       if (!removed) {
         return reply.status(404).send({ error: 'Usuário não encontrado' })
+      }
+      return reply.status(204).send()
+    },
+  })
+
+  // ══════════════════════════════════════════════════════════════
+  // SUPER ADMIN — edição e deleção em cascata (controle global)
+  // Guard: authManage (API key da conta ADMIN OU JWT) + requireSuperAdmin.
+  // ══════════════════════════════════════════════════════════════
+
+  // ── PATCH /admin/clients/:id — Edita uma conta (inclui ativar/desativar) ─
+  app.patch<{ Params: { id: string } }>('/admin/clients/:id', {
+    preHandler: [authManage, requireSuperAdmin],
+    handler: async (request, reply) => {
+      const body = updateClientSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+      try {
+        const client = await updateClient(request.params.id, body.data)
+        return reply.send({
+          id: client.id,
+          name: client.name,
+          role: client.role,
+          active: client.active,
+          fallbackEnabled: client.fallbackEnabled,
+          rateLimit: client.rateLimit,
+          maxInstances: client.maxInstances,
+          maxPerRecipientPerHour: client.maxPerRecipientPerHour,
+          updatedAt: client.updatedAt,
+        })
+      } catch (err) {
+        if (err instanceof ProvisioningError && err.code === 'CLIENT_NOT_FOUND') {
+          return reply.status(404).send({ error: 'Conta não encontrada' })
+        }
+        throw err
+      }
+    },
+  })
+
+  // ── DELETE /admin/clients/:id — Apaga DEFINITIVAMENTE a conta e tudo relacional ─
+  app.delete<{ Params: { id: string } }>('/admin/clients/:id', {
+    preHandler: [authManage, requireSuperAdmin],
+    handler: async (request, reply) => {
+      // Salvaguarda: a conta não pode apagar a si mesma (evita perder o acesso ADMIN).
+      if (request.apiClient?.id === request.params.id) {
+        return reply.status(409).send({ error: 'Não é possível apagar a própria conta autenticada' })
+      }
+      const removed = await deleteClientCascade(request.params.id, request.log)
+      if (!removed) {
+        return reply.status(404).send({ error: 'Conta não encontrada' })
+      }
+      return reply.status(204).send()
+    },
+  })
+
+  // ── PATCH /admin/users/:id — Edita um usuário (nome/papel/senha) ─
+  app.patch<{ Params: { id: string } }>('/admin/users/:id', {
+    preHandler: [authManage, requireSuperAdmin],
+    handler: async (request, reply) => {
+      const body = updateUserSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+      try {
+        const user = await updateUser(request.params.id, body.data)
+        return reply.send({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          apiClientId: user.apiClientId,
+          updatedAt: user.updatedAt,
+        })
+      } catch (err) {
+        if (err instanceof ProvisioningError && err.code === 'USER_NOT_FOUND') {
+          return reply.status(404).send({ error: 'Usuário não encontrado' })
+        }
+        throw err
+      }
+    },
+  })
+
+  // ── GET /admin/instances — Lista TODAS as instâncias (visão global) ─
+  app.get('/admin/instances', {
+    preHandler: [authManage, requireSuperAdmin],
+    handler: async (_request, reply) => {
+      return reply.send(await listAllInstances())
+    },
+  })
+
+  // ── DELETE /admin/instances/:id — Apaga DEFINITIVAMENTE qualquer instância ─
+  app.delete<{ Params: { id: string } }>('/admin/instances/:id', {
+    preHandler: [authManage, requireSuperAdmin],
+    handler: async (request, reply) => {
+      const removed = await deleteInstanceCascade(request.params.id, request.log)
+      if (!removed) {
+        return reply.status(404).send({ error: 'Instância não encontrada' })
       }
       return reply.status(204).send()
     },

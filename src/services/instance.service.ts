@@ -188,6 +188,15 @@ export function findInstanceScoped(id: string, apiClientId: string) {
   return prisma.instance.findFirst({ where: { id, apiClientId } })
 }
 
+// Visão GLOBAL (super admin): todas as instâncias de todas as contas, com o nome
+// da conta dona. NÃO escopada por tenant — usar apenas atrás de requireSuperAdmin.
+export function listAllInstances() {
+  return prisma.instance.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: { apiClient: { select: { id: true, name: true, active: true } } },
+  })
+}
+
 // Resolve a instância por id OU slug, sempre escopada ao tenant. Usada pelas
 // rotas REST/painel que aceitam tanto o cuid quanto o slug amigável na URL.
 export function findInstanceByIdOrSlug(idOrSlug: string, apiClientId: string) {

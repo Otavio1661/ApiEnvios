@@ -19,7 +19,7 @@ function isUniqueViolation(err: unknown): boolean {
 export class ProvisioningError extends Error {
   constructor(
     message: string,
-    public readonly code: 'EMAIL_TAKEN' | 'CLIENT_NOT_FOUND',
+    public readonly code: 'EMAIL_TAKEN' | 'CLIENT_NOT_FOUND' | 'USER_NOT_FOUND',
   ) {
     super(message)
     this.name = 'ProvisioningError'
@@ -181,4 +181,50 @@ export function listUsers(apiClientId?: string) {
 export async function deleteUser(id: string): Promise<boolean> {
   const result = await prisma.user.deleteMany({ where: { id } })
   return result.count > 0
+}
+
+// ── Edição (super admin) ──────────────────────────────────────
+
+export interface UpdateClientInput {
+  name?: string
+  role?: 'ADMIN' | 'CLIENT'
+  rateLimit?: number
+  maxInstances?: number
+  maxPerRecipientPerHour?: number
+  fallbackEnabled?: boolean
+  active?: boolean
+}
+
+// Edita uma conta (tenant). Campos ausentes não são tocados. `active=false`
+// é o "desativar" (a conta para de enviar e some das telas, mas o histórico fica).
+// Lança ProvisioningError('CLIENT_NOT_FOUND') se a conta não existir.
+export async function updateClient(id: string, data: UpdateClientInput): Promise<ApiClient> {
+  const exists = await prisma.apiClient.findUnique({ where: { id }, select: { id: true } })
+  if (!exists) {
+    throw new ProvisioningError('Conta não encontrada', 'CLIENT_NOT_FOUND')
+  }
+  return prisma.apiClient.update({ where: { id }, data })
+}
+
+export interface UpdateUserInput {
+  name?: string
+  role?: 'OWNER' | 'MEMBER' | 'SUPER_ADMIN'
+  // Quando presente, redefine a senha (será hasheada). Validação de tamanho no caller (Zod).
+  password?: string
+}
+
+// Edita um usuário (nome/papel/senha). Campos ausentes não são tocados.
+// Lança ProvisioningError('USER_NOT_FOUND') se o usuário não existir.
+export async function updateUser(id: string, input: UpdateUserInput): Promise<User> {
+  const exists = await prisma.user.findUnique({ where: { id }, select: { id: true } })
+  if (!exists) {
+    throw new ProvisioningError('Usuário não encontrado', 'USER_NOT_FOUND')
+  }
+
+  const data: Prisma.UserUpdateInput = {}
+  if (input.name !== undefined) data.name = input.name || null
+  if (input.role !== undefined) data.role = input.role
+  if (input.password) data.passwordHash = await hashPassword(input.password)
+
+  return prisma.user.update({ where: { id }, data })
 }

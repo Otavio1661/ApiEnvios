@@ -5,8 +5,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { authManage, authInstance, isSuperAdmin } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
-import { providers } from '../providers'
 import { enqueueSend } from '../queues/send-message.queue'
+import { deleteInstanceCascade } from '../services/cascade-delete.service'
 import { normalizePhone } from '../utils/helpers'
 import type { MessageType } from '../types'
 import {
@@ -205,16 +205,10 @@ export async function instancesRoutes(app: FastifyInstance) {
       const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
-      // Remove a instância no provider (best-effort — não bloqueia a exclusão local)
-      if (instance.instanceId) {
-        try {
-          await providers[instance.provider].deleteInstance(instance.instanceId)
-        } catch (err: any) {
-          request.log.warn(`[Instances] Falha ao remover instância no provider: ${err.message}`)
-        }
-      }
-
-      await prisma.instance.delete({ where: { id: instance.id } })
+      // Cascata: remove sessão no provider (best-effort) + filhos (mensagens, tentativas,
+      // rotações, números) numa transação. Evita o erro de FK do delete direto quando a
+      // instância já enviou mensagens/teve rotações.
+      await deleteInstanceCascade(instance.id, request.log)
       return reply.status(204).send()
     },
   })
