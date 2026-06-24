@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
+import { redis } from '../utils/redis'
 import { mapInboundStatus, normalizeProvider, isStatusAdvance } from '../services/inbound-status.service'
 import { dispatchWebhook } from '../services/notification.service'
 import { QR_TTL_SECONDS } from '../services/instance.service'
@@ -249,7 +250,20 @@ async function applyMessageStatus(
 // src/routes/health.route.ts (inline)
 export async function healthRoutes(app: FastifyInstance) {
   app.get('/health', async (_req, reply) => {
-    return reply.send({ status: 'ok', timestamp: new Date().toISOString() })
+    // Checa as dependências críticas (DB + Redis) em paralelo. 200 se ambas ok,
+    // 503 se alguma falhar — para health checks de orquestrador/uptime monitor.
+    const [db, redisOk] = await Promise.all([
+      prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false),
+      redis.ping().then((r) => r === 'PONG').catch(() => false),
+    ])
+    const healthy = db && redisOk
+    return reply.status(healthy ? 200 : 503).send({
+      status: healthy ? 'ok' : 'degraded',
+      version: process.env.npm_package_version ?? '1.0.0',
+      uptimeSec: Math.round(process.uptime()),
+      checks: { database: db ? 'up' : 'down', redis: redisOk ? 'up' : 'down' },
+      timestamp: new Date().toISOString(),
+    })
   })
 
   // Raiz → painel admin (evita 404 JSON feio para quem abre a URL no navegador).

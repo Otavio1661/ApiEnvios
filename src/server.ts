@@ -87,6 +87,24 @@ export function buildApp(): FastifyInstance {
   // portanto executado antes do hook do @fastify/rate-limit).
   app.addHook('onRequest', resolveTenantContext)
 
+  // Observabilidade: log estruturado por request COM contexto de tenant (resolvido no
+  // onRequest acima). Facilita rastrear uso/erros por conta. Ignora ruído (health/assets).
+  app.addHook('onResponse', async (request, reply) => {
+    if (request.url === '/health' || request.url.startsWith('/admin/assets/')) return
+    request.log.info(
+      {
+        tenant: request.apiClient?.id,
+        tenantName: request.apiClient?.name,
+        userId: request.authUser?.id,
+        method: request.method,
+        url: request.url,
+        statusCode: reply.statusCode,
+        responseTimeMs: Math.round(reply.elapsedTime),
+      },
+      'request',
+    )
+  })
+
   // Rate limit POR TENANT: a chave é o id do ApiClient (cai p/ IP se anônimo) e o
   // teto é o `rateLimit` do próprio cliente. /health e os webhooks inbound dos
   // providers ficam de fora (alto volume legítimo).

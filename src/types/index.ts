@@ -110,9 +110,10 @@ export type InstanceStatus =
   | 'unknown'
 
 // ── Eventos de webhook ────────────────────────────────────────
-export type WebhookEvent = 
+export type WebhookEvent =
   | 'BAN_DETECTED'
   | 'NUMBER_ROTATED'
+  | 'NUMBER_DISCONNECTED'
   | 'MESSAGE_FAILED'
   | 'MESSAGE_DELIVERED'
   | 'PROVIDER_DOWN'

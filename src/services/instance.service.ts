@@ -8,6 +8,7 @@ import { prisma } from '../utils/prisma'
 import { config } from '../config'
 import { providers } from '../providers'
 import { slugify, slugSchema } from '../utils/slug'
+import { dispatchWebhook } from './notification.service'
 
 // Tempo de validade do QR em segundos
 export const QR_TTL_SECONDS = 45
@@ -596,6 +597,35 @@ export async function syncNumberStatus(
     where: { id: number.id },
     data: { connectionState },
   })
+
+  // Observabilidade: alerta de QUEDA. Dispara um webhook (tenant-scoped) só na
+  // TRANSIÇÃO CONNECTED → não-conectado (evita ruído de estados repetidos).
+  // Best-effort: nunca quebra a sincronização de status.
+  if (number.connectionState === 'CONNECTED' && connectionState !== 'CONNECTED') {
+    try {
+      const inst = await prisma.instance.findUnique({
+        where: { id: number.instanceId },
+        select: { apiClientId: true },
+      })
+      if (inst) {
+        await dispatchWebhook(
+          'NUMBER_DISCONNECTED',
+          {
+            instanceId: number.instanceId,
+            numberId: number.id,
+            phone: number.phone,
+            label: number.label,
+            provider: number.provider,
+            connectionState,
+          },
+          inst.apiClientId,
+        )
+      }
+    } catch {
+      // alerta é best-effort — não bloqueia a sincronização
+    }
+  }
+
   return connectionState
 }
 
