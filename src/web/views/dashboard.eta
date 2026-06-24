@@ -19,6 +19,9 @@
   </form>
 </div>
 
+<% if (it.pageOk) { %>
+  <div class="alert alert-ok"><%= it.pageOk %></div>
+<% } %>
 <% if (it.pageError) { %>
   <div class="alert alert-error"><%= it.pageError %></div>
 <% } %>
@@ -29,7 +32,7 @@
     <div class="stat-label">Instâncias<% if (!it.isSuperAdmin) { %> (uso / quota)<% } else { %> (super admin: ilimitado)<% } %></div>
   </div>
   <div class="stat">
-    <div class="stat-num"><%= it.instances.filter(function(i){ return i.connectionState === 'CONNECTED' }).length %></div>
+    <div class="stat-num"><%= it.instances.filter(function(i){ return i.connection === 'CONNECTED' }).length %></div>
     <div class="stat-label">Conectadas</div>
   </div>
 </div>
@@ -63,7 +66,7 @@
       <% it.instances.forEach(function(inst){ %>
         <tr>
           <td><strong><%= inst.name || '—' %></strong><br/><code><%= inst.slug || '—' %></code></td>
-          <td><span class="badge badge-<%= inst.connectionState %>"><%= inst.connectionState %></span></td>
+          <td><span class="badge badge-<%= inst.connection %>"><%= inst.connection %></span></td>
           <td><code><%= inst.apiUrl %></code></td>
           <td><code><%= inst.id %></code></td>
           <td><code class="token-cell"><%= inst.token %></code></td>

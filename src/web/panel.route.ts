@@ -12,6 +12,7 @@ import { normalizePhone } from '../utils/helpers'
 import { enqueueSend, requeueSend, removeSendJob } from '../queues/send-message.queue'
 import {
   listInstances,
+  listInstancesWithConnection,
   findInstanceByIdOrSlug,
   createInstance,
   updateInstance,
@@ -42,7 +43,7 @@ import {
   updateClient,
   updateUser,
 } from '../services/provisioning.service'
-import { deleteClientCascade } from '../services/cascade-delete.service'
+import { deleteClientCascade, deleteInstanceCascade } from '../services/cascade-delete.service'
 
 // Nome do cookie de sessão do painel (mesmo JWT da API).
 const COOKIE_NAME = 'token'
@@ -296,14 +297,17 @@ export async function panelRoutes(app: FastifyInstance) {
   })
 
   // ── GET / — Dashboard ──────────────────────────────────────
-  app.get<{ Querystring: { err?: string } }>(
+  app.get<{ Querystring: { err?: string; ok?: string } }>(
     '/',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
       const account = request.apiClient!
       const isAdmin = isSuperAdmin(request)
       // MEMBER vê só as suas; OWNER/super admin veem todas as da conta (Fase 3).
-      const instances = (await listInstances(account.id, memberScopeId(request))).map(toInstanceResponse)
+      // `connection` = status derivado do pool de números (fonte de verdade do envio).
+      const instances = (await listInstancesWithConnection(account.id, memberScopeId(request))).map(
+        (i) => ({ ...toInstanceResponse(i), connection: i.connection }),
+      )
       return renderPage(
         app,
         reply,
@@ -314,6 +318,7 @@ export async function panelRoutes(app: FastifyInstance) {
           instances,
           isSuperAdmin: isSuperAdmin(request),
           pageError: request.query.err ? decodeURIComponent(request.query.err) : null,
+          pageOk: request.query.ok ? decodeURIComponent(request.query.ok) : null,
         },
         { user: request.authUser, isAdmin, isOwner: isPanelOwner(request), activeNav: 'instances' },
       )
@@ -424,6 +429,27 @@ export async function panelRoutes(app: FastifyInstance) {
         return reply.redirect(
           `/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao renomear a instância.')}`,
         )
+      }
+    },
+  )
+
+  // ── POST /instances/:id/delete — Apaga a instância (cascata) ─
+  // POST porque form HTML não emite DELETE. Escopo por papel (MEMBER só a sua).
+  // Reusa deleteInstanceCascade: remove números/mensagens/tentativas/rotações + sessão
+  // no provider (best-effort), evitando o erro de FK do delete direto.
+  app.post<{ Params: { id: string } }>(
+    '/instances/:id/delete',
+    { preHandler: requirePanelAuth },
+    async (request, reply) => {
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
+      if (!instance) return reply.redirect('/admin')
+
+      try {
+        await deleteInstanceCascade(instance.id, request.log)
+        return reply.redirect(`/admin?ok=${encodeURIComponent(`Instância "${instance.name || instance.slug || instance.id}" apagada.`)}`)
+      } catch (err: any) {
+        request.log.error(`[Painel] Falha ao apagar instância: ${err.message}`)
+        return reply.redirect(`/admin/instances/${instance.id}?err=${encodeURIComponent('Falha ao apagar a instância.')}`)
       }
     },
   )

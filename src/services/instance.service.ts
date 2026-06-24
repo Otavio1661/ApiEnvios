@@ -2,7 +2,7 @@
 // Lógica compartilhada de instâncias (gestão/QR/status) reusada tanto pela API REST
 // (src/routes/instances.route.ts) quanto pelo painel web (src/web/panel.route.ts).
 // NÃO contém regra de negócio nova: apenas centraliza o que antes estava inline na rota.
-import { Prisma, type Instance, type InstanceNumber, type Provider } from '@prisma/client'
+import { Prisma, type Instance, type InstanceNumber, type InstanceConnState, type Provider } from '@prisma/client'
 import type { FastifyBaseLogger } from 'fastify'
 import { prisma } from '../utils/prisma'
 import { config } from '../config'
@@ -188,6 +188,34 @@ export function listInstances(apiClientId: string, ownerUserId?: string) {
 
 export function findInstanceScoped(id: string, apiClientId: string) {
   return prisma.instance.findFirst({ where: { id, apiClientId } })
+}
+
+// Deriva o "status de autenticação" de uma instância a partir dos números do pool —
+// que é a fonte de verdade do envio desde a fase C3 (o roteador só usa números
+// CONNECTED). O Instance.connectionState é legado e não reflete mais o pool.
+//   CONNECTED   → ao menos um número conectado (pronto para enviar)
+//   QR_PENDING  → nenhum conectado, mas algum aguardando leitura do QR
+//   DISCONNECTED→ nenhum dos acima (inclui pool vazio)
+export function deriveConnectionState(
+  numbers: Array<Pick<InstanceNumber, 'connectionState'>>,
+): InstanceConnState {
+  if (numbers.some((n) => n.connectionState === 'CONNECTED')) return 'CONNECTED'
+  if (numbers.some((n) => n.connectionState === 'QR_PENDING')) return 'QR_PENDING'
+  return 'DISCONNECTED'
+}
+
+// Lista as instâncias da conta (escopo opcional de MEMBER) já com o status de
+// conexão DERIVADO do pool (campo `connection`), para o dashboard refletir o estado real.
+export async function listInstancesWithConnection(apiClientId: string, ownerUserId?: string) {
+  const instances = await prisma.instance.findMany({
+    where: { apiClientId, ...(ownerUserId ? { ownerUserId } : {}) },
+    orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+    include: { numbers: { select: { connectionState: true } } },
+  })
+  return instances.map(({ numbers, ...inst }) => ({
+    ...inst,
+    connection: deriveConnectionState(numbers),
+  }))
 }
 
 // Visão GLOBAL (super admin): todas as instâncias de todas as contas, com o nome

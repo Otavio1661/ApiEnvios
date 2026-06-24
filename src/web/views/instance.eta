@@ -205,6 +205,15 @@
   </table>
 </div>
 
+<div class="card">
+  <h2>Zona de perigo</h2>
+  <p class="muted">Apagar a instância remove <strong>definitivamente</strong> o pool de números, todas as mensagens e o histórico relacionado. Esta ação é irreversível.</p>
+  <form method="POST" action="/admin/instances/<%= it.instance.id %>/delete"
+        onsubmit="return confirm('APAGAR DEFINITIVAMENTE a instância &quot;<%= it.instance.name || it.instance.slug || it.instance.id %>&quot; e TODOS os dados (números, mensagens, histórico)? Esta ação é irreversível.')">
+    <button type="submit" class="btn btn-danger">Apagar instância</button>
+  </form>
+</div>
+
 <script>
   // C4: componente por NÚMERO do pool. Generaliza instancePanel recebendo o
   // numberId, batendo nos endpoints /admin/instances/:id/numbers/:numberId/...
