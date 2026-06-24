@@ -16,3 +16,4 @@ export const bullConnection: ConnectionOptions = {
 // Nomes das filas (constantes únicas)
 export const QUEUE_SEND_MESSAGE = 'send-message'
 export const QUEUE_MAINTENANCE = 'maintenance'
+export const QUEUE_WEBHOOK = 'webhook-delivery'

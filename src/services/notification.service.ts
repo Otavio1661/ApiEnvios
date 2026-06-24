@@ -3,12 +3,17 @@ import axios from 'axios'
 import { config } from '../config'
 import { prisma } from '../utils/prisma'
 import { logger } from '../utils/logger'
+import { enqueueWebhookDelivery } from '../queues/webhook.queue'
 import type { WebhookEvent, WebhookPayload } from '../types'
 
 // ── Dispara webhooks cadastrados no banco ─────────────────────
 // Quando `apiClientId` é informado (evento de um tenant específico, ex.: ban/message),
 // dispara para os webhooks daquele tenant E para os webhooks globais do admin (apiClientId null).
 // Quando omitido, dispara apenas para os webhooks globais (eventos de sistema).
+//
+// A entrega NÃO é mais inline: cada destino vira um job na fila webhook-delivery, com
+// retry/backoff e DLQ (BullMQ) + assinatura HMAC no worker. Aqui só resolvemos os
+// destinos e enfileiramos (rápido e resiliente a falhas do destino).
 export async function dispatchWebhook(
   event: WebhookEvent,
   data: Record<string, unknown>,
@@ -23,6 +28,7 @@ export async function dispatchWebhook(
         ? { OR: [{ apiClientId }, { apiClientId: null }] }
         : { apiClientId: null }),
     },
+    select: { id: true },
   })
 
   const payload: WebhookPayload = {
@@ -32,26 +38,7 @@ export async function dispatchWebhook(
   }
 
   for (const webhook of webhooks) {
-    try {
-      await axios.post(webhook.url, payload, {
-        timeout: 8000,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-ApiEnvios-Event': event,
-        },
-      })
-
-      await prisma.webhook.update({
-        where: { id: webhook.id },
-        data: { lastCalledAt: new Date() },
-      })
-    } catch (err: any) {
-      logger.error(`[Webhook] Falha ao chamar ${webhook.url}: ${err.message}`)
-      await prisma.webhook.update({
-        where: { id: webhook.id },
-        data: { failCount: { increment: 1 } },
-      })
-    }
+    await enqueueWebhookDelivery(webhook.id, event, payload)
   }
 }
 

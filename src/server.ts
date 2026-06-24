@@ -26,6 +26,7 @@ import { webhooksRoutes, healthRoutes, inboundWebhooksRoutes } from './routes/we
 import { prisma } from './utils/prisma'
 import { redis } from './utils/redis'
 import { startSendMessageWorker, stopSendMessageWorker } from './queues/send-message.worker'
+import { startWebhookWorker, stopWebhookWorker } from './queues/webhook.worker'
 import { startScheduler, stopScheduler } from './queues/scheduler'
 
 // ── Fábrica do app ────────────────────────────────────────────
@@ -142,6 +143,10 @@ async function start() {
     startSendMessageWorker()
     app.log.info('✅ Worker send-message iniciado')
 
+    // Worker de entrega de webhooks (retry/backoff + DLQ + HMAC)
+    startWebhookWorker()
+    app.log.info('✅ Worker webhook-delivery iniciado')
+
     // Scheduler: repeatable jobs (reset-counters meia-noite + scheduled-messages a cada min)
     // Substitui o resetDailyCounters() que antes rodava só no boot dev.
     await startScheduler()
@@ -163,6 +168,7 @@ async function shutdown(signal: string) {
   try {
     await app.close()
     await stopSendMessageWorker()
+    await stopWebhookWorker()
     await stopScheduler()
     await prisma.$disconnect()
     redis.disconnect()
