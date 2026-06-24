@@ -29,7 +29,7 @@ import {
   deleteNumber,
   assertInstanceQuota,
 } from '../services/instance.service'
-import { isSuperAdmin } from '../middlewares/auth.middleware'
+import { isSuperAdmin, memberScopeId } from '../middlewares/auth.middleware'
 import { slugSchema } from '../utils/slug'
 import {
   ProvisioningError,
@@ -38,7 +38,9 @@ import {
   listClients,
   listUsers,
   deleteUser,
+  updateClient,
 } from '../services/provisioning.service'
+import { deleteClientCascade } from '../services/cascade-delete.service'
 
 // Nome do cookie de sessão do painel (mesmo JWT da API).
 const COOKIE_NAME = 'token'
@@ -128,6 +130,7 @@ const manageClientSchema = z
     fallbackEnabled: z.boolean().default(false),
     rateLimit: z.coerce.number().int().positive().default(100),
     maxInstances: z.coerce.number().int().positive().default(1),
+    maxPerRecipientPerHour: z.coerce.number().int().min(0).default(10),
     ownerEmail: z.string().email().optional(),
     ownerPassword: z.string().min(8).optional(),
     ownerName: z.string().optional(),
@@ -149,6 +152,11 @@ const manageUserSchema = z.object({
 // Atualização da quota (maxInstances) de uma conta — só super admin.
 const manageQuotaSchema = z.object({
   maxInstances: z.coerce.number().int().positive(),
+})
+
+// Atualização do teto anti-flood por destinatário (Fase 1) — só super admin. 0 = ilimitado.
+const manageLimitSchema = z.object({
+  maxPerRecipientPerHour: z.coerce.number().int().min(0),
 })
 
 // Normaliza valores de formulário HTML: strings vazias → undefined; checkbox → boolean.
@@ -250,7 +258,8 @@ export async function panelRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const account = request.apiClient!
       const isAdmin = isSuperAdmin(request)
-      const instances = (await listInstances(account.id)).map(toInstanceResponse)
+      // MEMBER vê só as suas; OWNER/super admin veem todas as da conta (Fase 3).
+      const instances = (await listInstances(account.id, memberScopeId(request))).map(toInstanceResponse)
       return renderPage(
         app,
         reply,
@@ -318,6 +327,8 @@ export async function panelRoutes(app: FastifyInstance) {
         slug: parsed.data.slug,
         provider: parsed.data.provider,
         apiClientId: request.apiClient!.id,
+        // Quem cria pelo painel vira dono (MEMBER vê só as suas).
+        ownerUserId: request.authUser?.id ?? null,
       })
       return reply.redirect(`/admin/instances/${instance.id}`)
     } catch (err: any) {
@@ -334,7 +345,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/rename',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.redirect('/admin')
 
       const raw = (request.body ?? {}) as Record<string, unknown>
@@ -378,7 +389,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.redirect('/admin')
 
       const messages = await prisma.message.findMany({
@@ -418,7 +429,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/test',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.redirect('/admin')
 
       const parsed = testMessageSchema.safeParse(request.body)
@@ -455,7 +466,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/messages/:msgId/resend',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.redirect('/admin')
 
       const message = await prisma.message.findFirst({
@@ -487,7 +498,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/messages/:msgId/delete',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.redirect('/admin')
 
       const message = await prisma.message.findFirst({
@@ -523,7 +534,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/numbers',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.redirect('/admin')
 
       const raw = (request.body ?? {}) as Record<string, unknown>
@@ -575,7 +586,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/numbers/:numberId/delete',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.redirect('/admin')
 
       const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
@@ -597,7 +608,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/numbers/:numberId/connect',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
@@ -624,7 +635,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/numbers/:numberId/qr',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
@@ -663,7 +674,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/numbers/:numberId/status',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
@@ -705,6 +716,7 @@ export async function panelRoutes(app: FastifyInstance) {
           title: 'Gestão — ApiEnvios',
           // user no corpo da view (layoutData é separado) para marcar "você".
           user: request.authUser,
+          currentClientId: request.apiClient!.id,
           clients,
           users,
           clientNames,
@@ -726,6 +738,7 @@ export async function panelRoutes(app: FastifyInstance) {
       fallbackEnabled: raw.fallbackEnabled === 'on' || raw.fallbackEnabled === 'true',
       rateLimit: emptyToUndefined(raw.rateLimit),
       maxInstances: emptyToUndefined(raw.maxInstances),
+      maxPerRecipientPerHour: emptyToUndefined(raw.maxPerRecipientPerHour),
       ownerEmail: emptyToUndefined(raw.ownerEmail),
       ownerPassword: emptyToUndefined(raw.ownerPassword),
       ownerName: emptyToUndefined(raw.ownerName),
@@ -837,6 +850,78 @@ export async function panelRoutes(app: FastifyInstance) {
     },
   )
 
+  // ── POST /manage/clients/:id/limit — Teto anti-flood por destinatário (Fase 1) ─
+  app.post<{ Params: { id: string } }>(
+    '/manage/clients/:id/limit',
+    { preHandler: requirePanelAdmin },
+    async (request, reply) => {
+      const parsed = manageLimitSchema.safeParse({
+        maxPerRecipientPerHour: (request.body as Record<string, unknown>)?.maxPerRecipientPerHour,
+      })
+      if (!parsed.success) {
+        return reply.redirect(
+          `/admin/manage?err=${encodeURIComponent('Limite inválido (use 0 ou um inteiro positivo).')}`,
+        )
+      }
+      try {
+        await updateClient(request.params.id, { maxPerRecipientPerHour: parsed.data.maxPerRecipientPerHour })
+        return reply.redirect(`/admin/manage?ok=${encodeURIComponent('Limite por destinatário atualizado.')}`)
+      } catch (err: any) {
+        if (err instanceof ProvisioningError && err.code === 'CLIENT_NOT_FOUND') {
+          return reply.redirect(`/admin/manage?err=${encodeURIComponent('Conta não encontrada.')}`)
+        }
+        request.log.error(`[Painel] Falha ao atualizar limite: ${err.message}`)
+        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Falha ao atualizar o limite.')}`)
+      }
+    },
+  )
+
+  // ── POST /manage/clients/:id/toggle-active — Ativa/desativa a conta ─
+  app.post<{ Params: { id: string } }>(
+    '/manage/clients/:id/toggle-active',
+    { preHandler: requirePanelAdmin },
+    async (request, reply) => {
+      const current = await prisma.apiClient.findUnique({
+        where: { id: request.params.id },
+        select: { active: true },
+      })
+      if (!current) {
+        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Conta não encontrada.')}`)
+      }
+      try {
+        const updated = await updateClient(request.params.id, { active: !current.active })
+        const msg = updated.active ? 'Conta ativada.' : 'Conta desativada.'
+        return reply.redirect(`/admin/manage?ok=${encodeURIComponent(msg)}`)
+      } catch (err: any) {
+        request.log.error(`[Painel] Falha ao alternar status: ${err.message}`)
+        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Falha ao alterar o status da conta.')}`)
+      }
+    },
+  )
+
+  // ── POST /manage/clients/:id/delete — Apaga DEFINITIVAMENTE a conta (cascata) ─
+  app.post<{ Params: { id: string } }>(
+    '/manage/clients/:id/delete',
+    { preHandler: requirePanelAdmin },
+    async (request, reply) => {
+      // Salvaguarda: não apagar a própria conta autenticada (perderia o acesso).
+      if (request.apiClient?.id === request.params.id) {
+        return reply.redirect(
+          `/admin/manage?err=${encodeURIComponent('Você não pode apagar a própria conta.')}`,
+        )
+      }
+      try {
+        const removed = await deleteClientCascade(request.params.id, request.log)
+        const msg = removed ? 'Conta e todos os dados relacionados foram apagados.' : 'Conta não encontrada.'
+        const key = removed ? 'ok' : 'err'
+        return reply.redirect(`/admin/manage?${key}=${encodeURIComponent(msg)}`)
+      } catch (err: any) {
+        request.log.error(`[Painel] Falha ao apagar conta (cascata): ${err.message}`)
+        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Falha ao apagar a conta.')}`)
+      }
+    },
+  )
+
   // ══════════════════════════════════════════════════════════
   // Endpoints finos JSON p/ Alpine (mesmos serviços da API REST)
   // ══════════════════════════════════════════════════════════
@@ -846,7 +931,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/connect',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       try {
@@ -868,7 +953,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/qr',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
       if (instance.provider === 'CLOUD_API') {
         return reply.status(400).send({ error: 'Cloud API não utiliza QR Code' })
@@ -902,7 +987,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/instances/:id/status',
     { preHandler: requirePanelAuth },
     async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       try {

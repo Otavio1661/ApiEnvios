@@ -37,6 +37,10 @@
         <span>Quota de instâncias (máx.)</span>
         <input type="number" name="maxInstances" value="1" min="1" />
       </label>
+      <label class="field">
+        <span>Limite por destinatário/hora (0 = ilimitado)</span>
+        <input type="number" name="maxPerRecipientPerHour" value="10" min="0" />
+      </label>
       <label class="field-check">
         <input type="checkbox" name="fallbackEnabled" />
         <span>Habilitar fallback entre providers</span>
@@ -112,30 +116,49 @@
         <th>Ativa</th>
         <th>Instâncias</th>
         <th>Quota</th>
+        <th>Teto/destino/h</th>
         <th>Usuários</th>
         <th>Enviadas</th>
-        <th>ID</th>
+        <th>Ações</th>
       </tr>
     </thead>
     <tbody>
       <% if (it.clients.length === 0) { %>
-        <tr><td colspan="8" class="muted center">Nenhuma conta ainda.</td></tr>
+        <tr><td colspan="9" class="muted center">Nenhuma conta ainda.</td></tr>
       <% } %>
       <% it.clients.forEach(function(c){ %>
         <tr>
-          <td><strong><%= c.name %></strong></td>
+          <td><strong><%= c.name %></strong><br/><code class="muted"><%= c.id %></code></td>
           <td><span class="badge badge-msg"><%= c.role %></span></td>
           <td><%= c.active ? 'Sim' : 'Não' %></td>
           <td><%= c._count.instances %> / <%= c.maxInstances %></td>
           <td>
             <form method="POST" action="/admin/manage/clients/<%= c.id %>/quota" class="inline" style="display:flex;gap:4px;align-items:center">
-              <input type="number" name="maxInstances" value="<%= c.maxInstances %>" min="1" style="width:64px" />
-              <button type="submit" class="btn btn-ghost">Salvar</button>
+              <input type="number" name="maxInstances" value="<%= c.maxInstances %>" min="1" style="width:60px" />
+              <button type="submit" class="btn btn-ghost">OK</button>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="/admin/manage/clients/<%= c.id %>/limit" class="inline" style="display:flex;gap:4px;align-items:center">
+              <input type="number" name="maxPerRecipientPerHour" value="<%= c.maxPerRecipientPerHour %>" min="0" style="width:60px" title="0 = ilimitado" />
+              <button type="submit" class="btn btn-ghost">OK</button>
             </form>
           </td>
           <td><%= c._count.users %></td>
           <td><%= c.totalSent %></td>
-          <td><code><%= c.id %></code></td>
+          <td style="display:flex;gap:4px;flex-wrap:wrap">
+            <form method="POST" action="/admin/manage/clients/<%= c.id %>/toggle-active" class="inline">
+              <button type="submit" class="btn btn-ghost"><%= c.active ? 'Desativar' : 'Ativar' %></button>
+            </form>
+            <% if (c.id !== it.currentClientId) { %>
+              <form method="POST" action="/admin/manage/clients/<%= c.id %>/delete" class="inline"
+                    onsubmit="return confirm('APAGAR DEFINITIVAMENTE a conta &quot;<%= c.name %>&quot; e TODOS os dados (instâncias, mensagens, usuários)? Esta ação é irreversível.')">
+                <button type="submit" class="btn btn-ghost btn-danger">Apagar</button>
+              </form>
+            <% } else { %>
+              <span class="muted">atual</span>
+            <% } %>
+          </td>
         </tr>
       <% }) %>
     </tbody>
