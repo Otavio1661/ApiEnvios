@@ -3,7 +3,7 @@
 // Reaproveita os métodos já existentes dos providers (createInstance/getInstanceStatus/deleteInstance).
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { authManage, authInstance, isSuperAdmin } from '../middlewares/auth.middleware'
+import { authManage, authInstance, authJwt, isSuperAdmin, requireOwner, memberScopeId } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { enqueueSend } from '../queues/send-message.queue'
 import { deleteInstanceCascade } from '../services/cascade-delete.service'
@@ -18,6 +18,7 @@ import {
   assertInstanceQuota,
   findInstanceByIdOrSlug,
   updateInstance,
+  assignInstanceOwner,
   InstanceError,
   listNumbers,
   addNumber,
@@ -49,6 +50,11 @@ const updateInstanceSchema = z
 
 const patchStatusSchema = z.object({
   status: z.enum(['ACTIVE', 'WARMING', 'BANNED', 'SUSPENDED', 'RETIRED']),
+})
+
+// Reatribuição de dono (OWNER): ownerUserId = id do membro, ou null para remover o dono.
+const patchOwnerSchema = z.object({
+  ownerUserId: z.string().min(1).nullable(),
 })
 
 // Fase C2: adicionar número ao pool de uma instância.
@@ -103,6 +109,9 @@ export async function instancesRoutes(app: FastifyInstance) {
           provider: body.data.provider,
           priority: body.data.priority,
           apiClientId: request.apiClient!.id,
+          // O usuário humano que cria vira dono (MEMBER vê só as suas). API key
+          // de máquina (sem authUser) cria instância de nível de conta (sem dono).
+          ownerUserId: request.authUser?.id ?? null,
         })
         return reply.status(201).send(toInstanceResponse(instance))
       } catch (err: any) {
@@ -127,7 +136,7 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
       }
 
-      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!existing) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       try {
@@ -149,12 +158,44 @@ export async function instancesRoutes(app: FastifyInstance) {
     },
   })
 
+  // ── PATCH /instances/:id/owner — (Re)atribui o dono (só OWNER) ─
+  // OWNER da conta atribui a instância a um MEMBER (ou remove o dono com null).
+  app.patch<{ Params: { id: string } }>('/instances/:id/owner', {
+    preHandler: [authJwt, requireOwner],
+    handler: async (request, reply) => {
+      const body = patchOwnerSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+
+      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      if (!existing) return reply.status(404).send({ error: 'Instância não encontrada' })
+
+      try {
+        const instance = await assignInstanceOwner({
+          instanceId: existing.id,
+          apiClientId: request.apiClient!.id,
+          ownerUserId: body.data.ownerUserId,
+        })
+        return reply.send(toInstanceResponse(instance))
+      } catch (err: any) {
+        if (err instanceof InstanceError) {
+          return reply.status(err.code === 'NOT_FOUND' ? 404 : 409).send({ error: err.message, code: err.code })
+        }
+        request.log.error(`[Instances] Falha ao atribuir dono: ${err.message}`)
+        return reply.status(500).send({ error: 'Falha ao atribuir o dono da instância' })
+      }
+    },
+  })
+
   // ── GET /instances — Lista instâncias do tenant ───────────────
   app.get('/instances', {
     preHandler: authManage,
     handler: async (request, reply) => {
+      // MEMBER vê só as suas; OWNER/admin/API key veem todas as da conta.
+      const ownerUserId = memberScopeId(request)
       const instances = await prisma.instance.findMany({
-        where: { apiClientId: request.apiClient!.id },
+        where: { apiClientId: request.apiClient!.id, ...(ownerUserId ? { ownerUserId } : {}) },
         orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
       })
       return reply.send(instances.map(toInstanceResponse))
@@ -166,15 +207,18 @@ export async function instancesRoutes(app: FastifyInstance) {
     preHandler: authManage,
     handler: async (request, reply) => {
       const apiClientId = request.apiClient!.id
+      // MEMBER: estatísticas restritas às instâncias dele; demais: conta inteira.
+      const ownerUserId = memberScopeId(request)
+      const scope = { apiClientId, ...(ownerUserId ? { ownerUserId } : {}) }
       const [active, banned, total, sentToday] = await Promise.all([
-        prisma.instance.count({ where: { apiClientId, status: 'ACTIVE' } }),
-        prisma.instance.count({ where: { apiClientId, status: 'BANNED' } }),
-        prisma.instance.count({ where: { apiClientId } }),
+        prisma.instance.count({ where: { ...scope, status: 'ACTIVE' } }),
+        prisma.instance.count({ where: { ...scope, status: 'BANNED' } }),
+        prisma.instance.count({ where: scope }),
         // Fase C3 moveu os contadores de envio para os NÚMEROS do pool
         // (InstanceNumber); Instance.sentToday não é mais incrementado. Somamos
-        // pelos números das instâncias do tenant.
+        // pelos números das instâncias do escopo.
         prisma.instanceNumber.aggregate({
-          where: { instance: { apiClientId } },
+          where: { instance: scope },
           _sum: { sentToday: true },
         }),
       ])
@@ -192,7 +236,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/instances/:id', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
       return reply.send(toInstanceResponse(instance))
     },
@@ -202,7 +246,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/instances/:id', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       // Cascata: remove sessão no provider (best-effort) + filhos (mensagens, tentativas,
@@ -217,7 +261,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/instances/:id/connect', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       // Cloud API não tem fluxo de QR — já é considerada conectada
@@ -267,7 +311,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/instances/:id/qr', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       if (instance.provider === 'CLOUD_API') {
@@ -309,7 +353,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/instances/:id/status', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       try {
@@ -335,7 +379,7 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Status inválido' })
       }
 
-      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!existing) {
         return reply.status(404).send({ error: 'Instância não encontrada' })
       }
@@ -352,7 +396,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/instances/:id/rotate', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const existing = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!existing) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       const instance = await prisma.instance.update({
@@ -386,7 +430,7 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
       }
 
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       // WAHA restrito ao super admin.
@@ -420,7 +464,7 @@ export async function instancesRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/instances/:id/numbers', {
     preHandler: authManage,
     handler: async (request, reply) => {
-      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+      const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
       const numbers = await listNumbers(instance.id)
@@ -434,7 +478,7 @@ export async function instancesRoutes(app: FastifyInstance) {
     {
       preHandler: authManage,
       handler: async (request, reply) => {
-        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
         if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
         const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
@@ -463,7 +507,7 @@ export async function instancesRoutes(app: FastifyInstance) {
     {
       preHandler: authManage,
       handler: async (request, reply) => {
-        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
         if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
         const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
@@ -513,7 +557,7 @@ export async function instancesRoutes(app: FastifyInstance) {
     {
       preHandler: authManage,
       handler: async (request, reply) => {
-        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
         if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
         const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)
@@ -542,7 +586,7 @@ export async function instancesRoutes(app: FastifyInstance) {
     {
       preHandler: authManage,
       handler: async (request, reply) => {
-        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id)
+        const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
         if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
 
         const number = await findNumberScoped(request.params.numberId, request.apiClient!.id)

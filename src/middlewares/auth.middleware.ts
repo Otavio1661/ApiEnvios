@@ -203,5 +203,22 @@ export async function requireSuperAdmin(request: FastifyRequest, reply: FastifyR
   }
 }
 
+// Guard: exige dono da conta (OWNER) ou super admin — para o self-service de time
+// (OWNER gerencia os MEMBERs da própria conta). API key de máquina (sem authUser)
+// NÃO é tratada como owner deste fluxo humano. Usar depois de authJwt.
+export async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
+  const role = request.authUser?.role
+  if (role !== 'OWNER' && role !== 'SUPER_ADMIN') {
+    return reply.status(403).send({ error: 'Acesso restrito ao dono da conta' })
+  }
+}
+
+// Escopo de instância por papel: um MEMBER (login humano) só enxerga as instâncias
+// das quais é dono (ownerUserId). OWNER, super admin e acesso por API key (máquina)
+// retornam undefined → enxergam todas as instâncias da conta.
+export function memberScopeId(request: FastifyRequest): string | undefined {
+  return request.authUser?.role === 'MEMBER' ? request.authUser.id : undefined
+}
+
 // Alias de compatibilidade com imports existentes
 export const authMiddleware = authAccount

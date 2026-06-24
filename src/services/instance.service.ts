@@ -177,9 +177,11 @@ export async function registerInboundWebhook(
 // ── Operações de alto nível (escopadas por tenant) ───────────────
 // Reusadas por API e painel. Todas recebem apiClientId para garantir o escopo.
 
-export function listInstances(apiClientId: string) {
+// Lista instâncias da conta. `ownerUserId` (opcional) restringe ao dono — usado
+// para o escopo de MEMBER (vê só as suas). Ausente = todas as da conta (OWNER/admin).
+export function listInstances(apiClientId: string, ownerUserId?: string) {
   return prisma.instance.findMany({
-    where: { apiClientId },
+    where: { apiClientId, ...(ownerUserId ? { ownerUserId } : {}) },
     orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
   })
 }
@@ -199,9 +201,15 @@ export function listAllInstances() {
 
 // Resolve a instância por id OU slug, sempre escopada ao tenant. Usada pelas
 // rotas REST/painel que aceitam tanto o cuid quanto o slug amigável na URL.
-export function findInstanceByIdOrSlug(idOrSlug: string, apiClientId: string) {
+// `ownerUserId` (opcional) restringe ao dono — escopo de MEMBER: se a instância
+// não for dele, retorna null (o caller responde 404, sem vazar existência).
+export function findInstanceByIdOrSlug(idOrSlug: string, apiClientId: string, ownerUserId?: string) {
   return prisma.instance.findFirst({
-    where: { apiClientId, OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    where: {
+      apiClientId,
+      OR: [{ id: idOrSlug }, { slug: idOrSlug }],
+      ...(ownerUserId ? { ownerUserId } : {}),
+    },
   })
 }
 
@@ -235,6 +243,8 @@ export async function createInstance(input: {
   provider: Instance['provider']
   priority?: number
   apiClientId: string
+  // Dono (usuário) da instância. MEMBER que cria vira dono; ausente = sem dono.
+  ownerUserId?: string | null
 }): Promise<Instance> {
   const slug = input.slug
     ? normalizeExplicitSlug(input.slug)
@@ -248,11 +258,45 @@ export async function createInstance(input: {
         provider: input.provider,
         priority: input.priority ?? 0,
         apiClientId: input.apiClientId,
+        ownerUserId: input.ownerUserId ?? null,
       },
     })
   } catch (err) {
     throw mapUniqueViolation(err)
   }
+}
+
+// (Re)atribui o dono de uma instância — exclusivo do OWNER. Valida que a instância
+// é da conta e que o novo dono (quando informado) é usuário da MESMA conta.
+// `ownerUserId = null` remove o dono (volta a ser de nível de conta).
+// Lança InstanceError('NOT_FOUND') se a instância ou o usuário-alvo não pertencerem à conta.
+export async function assignInstanceOwner(input: {
+  instanceId: string
+  apiClientId: string
+  ownerUserId: string | null
+}): Promise<Instance> {
+  const existing = await prisma.instance.findFirst({
+    where: { id: input.instanceId, apiClientId: input.apiClientId },
+    select: { id: true },
+  })
+  if (!existing) {
+    throw new InstanceError('Instância não encontrada', 'NOT_FOUND')
+  }
+
+  if (input.ownerUserId) {
+    const target = await prisma.user.findFirst({
+      where: { id: input.ownerUserId, apiClientId: input.apiClientId },
+      select: { id: true },
+    })
+    if (!target) {
+      throw new InstanceError('Usuário-alvo não pertence a esta conta', 'NOT_FOUND')
+    }
+  }
+
+  return prisma.instance.update({
+    where: { id: existing.id },
+    data: { ownerUserId: input.ownerUserId },
+  })
 }
 
 // Atualiza name e/ou slug de uma instância (renomear), escopado por tenant.
