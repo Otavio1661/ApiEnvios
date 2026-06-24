@@ -197,10 +197,11 @@ export function findInstanceScoped(id: string, apiClientId: string) {
 //   QR_PENDING  → nenhum conectado, mas algum aguardando leitura do QR
 //   DISCONNECTED→ nenhum dos acima (inclui pool vazio)
 export function deriveConnectionState(
-  numbers: Array<Pick<InstanceNumber, 'connectionState'>>,
+  numbers: Array<Pick<InstanceNumber, 'connectionState'>> | null | undefined,
 ): InstanceConnState {
-  if (numbers.some((n) => n.connectionState === 'CONNECTED')) return 'CONNECTED'
-  if (numbers.some((n) => n.connectionState === 'QR_PENDING')) return 'QR_PENDING'
+  const list = numbers ?? []
+  if (list.some((n) => n.connectionState === 'CONNECTED')) return 'CONNECTED'
+  if (list.some((n) => n.connectionState === 'QR_PENDING')) return 'QR_PENDING'
   return 'DISCONNECTED'
 }
 

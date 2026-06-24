@@ -11,6 +11,8 @@ import { normalizePhone } from '../utils/helpers'
 import type { MessageType } from '../types'
 import {
   toInstanceResponse,
+  listInstancesWithConnection,
+  deriveConnectionState,
   refreshQr,
   registerInboundWebhook,
   syncInstanceStatus,
@@ -193,12 +195,10 @@ export async function instancesRoutes(app: FastifyInstance) {
     preHandler: authManage,
     handler: async (request, reply) => {
       // MEMBER vê só as suas; OWNER/admin/API key veem todas as da conta.
-      const ownerUserId = memberScopeId(request)
-      const instances = await prisma.instance.findMany({
-        where: { apiClientId: request.apiClient!.id, ...(ownerUserId ? { ownerUserId } : {}) },
-        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
-      })
-      return reply.send(instances.map(toInstanceResponse))
+      // `connection` = status derivado do pool (fonte de verdade do envio); mantém
+      // `connectionState` legado por compatibilidade.
+      const instances = await listInstancesWithConnection(request.apiClient!.id, memberScopeId(request))
+      return reply.send(instances.map((i) => ({ ...toInstanceResponse(i), connection: i.connection })))
     },
   })
 
@@ -238,7 +238,12 @@ export async function instancesRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
-      return reply.send(toInstanceResponse(instance))
+      // Status derivado do pool (mesmo do painel); mantém o legado por compatibilidade.
+      const numbers = await prisma.instanceNumber.findMany({
+        where: { instanceId: instance.id },
+        select: { connectionState: true },
+      })
+      return reply.send({ ...toInstanceResponse(instance), connection: deriveConnectionState(numbers) })
     },
   })
 
