@@ -55,7 +55,10 @@
           <td class="muted"><%= w.lastCalledAt ? new Date(w.lastCalledAt).toLocaleString('pt-BR') : '—' %></td>
           <td><%= w.failCount %></td>
           <td style="display:flex;gap:4px;flex-wrap:wrap">
-            <form method="POST" action="/admin/webhooks/<%= w.id %>/test" class="inline">
+            <form method="POST" action="/admin/webhooks/<%= w.id %>/test" class="inline" style="display:flex;gap:4px;align-items:center">
+              <select name="event" title="Evento a disparar no teste" style="padding:4px 6px">
+                <% w.events.forEach(function(e){ %><option value="<%= e %>"><%= e %></option><% }) %>
+              </select>
               <button type="submit" class="btn btn-ghost" title="Enfileira um evento de teste">Testar</button>
             </form>
             <form method="POST" action="/admin/webhooks/<%= w.id %>/toggle" class="inline">

@@ -1375,8 +1375,11 @@ export async function panelRoutes(app: FastifyInstance) {
         select: { id: true, events: true },
       })
       if (!wh) return reply.redirect(`/admin/webhooks?err=${encodeURIComponent('Webhook não encontrado.')}`)
+      // Evento escolhido no formulário (validado contra os eventos do webhook);
+      // fallback para o primeiro evento assinado.
+      const chosen = (request.body as { event?: string } | undefined)?.event
+      const event = (chosen && wh.events.includes(chosen) ? chosen : wh.events[0] ?? 'BAN_DETECTED') as any
       // Enfileira uma entrega de teste (passa pela mesma esteira: retry + HMAC).
-      const event = (wh.events[0] as any) ?? 'BAN_DETECTED'
       await enqueueWebhookDelivery(wh.id, event, {
         event,
         timestamp: new Date().toISOString(),
