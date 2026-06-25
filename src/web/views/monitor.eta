@@ -11,7 +11,11 @@
     isSuperAdmin: <%~ it.isSuperAdmin ? 'true' : 'false' %>,
     queues: <%~ JSON.stringify(it.queues) %>,
     messages: <%~ JSON.stringify(it.messages) %>,
-    campaigns: <%~ JSON.stringify(it.campaigns) %>
+    campaigns: <%~ JSON.stringify(it.campaigns) %>,
+    instances: <%~ JSON.stringify(it.instances) %>,
+    statuses: <%~ JSON.stringify(it.statuses) %>,
+    filterStatus: <%~ JSON.stringify(it.filterStatus) %>,
+    filterInstanceId: <%~ JSON.stringify(it.filterInstanceId) %>
   };
   function monitorPanel() {
     return {
@@ -19,11 +23,22 @@
       queues: window.__MONITOR__.queues,
       messages: window.__MONITOR__.messages || [],
       campaigns: window.__MONITOR__.campaigns || [],
+      instances: window.__MONITOR__.instances || [],
+      statuses: window.__MONITOR__.statuses || [],
+      filterStatus: window.__MONITOR__.filterStatus || '',
+      filterInstanceId: window.__MONITOR__.filterInstanceId || '',
       _timer: null,
       init() { this._timer = setInterval(() => this.refresh(), 4000); },
+      _query() {
+        const p = new URLSearchParams();
+        if (this.filterStatus) p.set('status', this.filterStatus);
+        if (this.filterInstanceId) p.set('instanceId', this.filterInstanceId);
+        const s = p.toString();
+        return s ? ('?' + s) : '';
+      },
       async refresh() {
         try {
-          const r = await fetch('/admin/monitor/data');
+          const r = await fetch('/admin/monitor/data' + this._query());
           if (!r.ok) return;
           const d = await r.json();
           this.queues = d.queues; this.messages = d.messages || []; this.campaigns = d.campaigns || [];
@@ -91,9 +106,22 @@
 
   <!-- Mensagens recentes -->
   <div class="card">
-    <h2>Mensagens recentes</h2>
+    <div class="page-head">
+      <h2>Mensagens recentes</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select x-model="filterStatus" @change="refresh()" style="padding:6px 8px">
+          <option value="">Todos os status</option>
+          <template x-for="s in statuses" :key="s"><option :value="s" x-text="s"></option></template>
+        </select>
+        <select x-model="filterInstanceId" @change="refresh()" style="padding:6px 8px">
+          <option value="">Todas as instâncias</option>
+          <template x-for="i in instances" :key="i.id"><option :value="i.id" x-text="i.name || i.slug || i.id"></option></template>
+        </select>
+        <button type="button" class="btn btn-ghost" @click="filterStatus=''; filterInstanceId=''; refresh()">Limpar</button>
+      </div>
+    </div>
     <table class="instances-table">
-      <thead><tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Instância</th><th>Quando</th><th>Erro</th></tr></thead>
+      <thead><tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Instância</th><th>Enviado por</th><th>Quando</th><th>Erro</th></tr></thead>
       <tbody>
         <template x-for="m in messages" :key="m.id">
           <tr>
@@ -101,11 +129,12 @@
             <td x-text="m.type"></td>
             <td><span class="badge badge-msg" x-text="m.status"></span></td>
             <td class="muted" x-text="m.instance ? (m.instance.name || m.instance.slug) : '—'"></td>
+            <td class="muted" x-text="m.sentBy || 'API/sistema'"></td>
             <td class="muted" x-text="fmt(m.createdAt)"></td>
             <td class="muted" x-text="m.errorMessage || ''"></td>
           </tr>
         </template>
-        <tr x-show="messages.length === 0"><td colspan="6" class="muted center">Nenhuma mensagem ainda.</td></tr>
+        <tr x-show="messages.length === 0"><td colspan="7" class="muted center">Nenhuma mensagem para o filtro atual.</td></tr>
       </tbody>
     </table>
   </div>

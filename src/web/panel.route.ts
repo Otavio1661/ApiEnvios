@@ -326,31 +326,56 @@ export async function panelRoutes(app: FastifyInstance) {
     },
   )
 
+  // Status válidos de mensagem (para o filtro do monitor).
+  const MSG_STATUSES = ['QUEUED', 'SENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED', 'SCHEDULED', 'CANCELLED']
+  // Lê e valida os filtros do monitor a partir da query (status/instanceId).
+  function monitorFilters(request: FastifyRequest) {
+    const q = request.query as { status?: string; instanceId?: string }
+    return {
+      status: q.status && MSG_STATUSES.includes(q.status) ? (q.status as any) : undefined,
+      instanceId: q.instanceId || undefined,
+    }
+  }
+
   // ── GET /monitor — Painel de monitoramento (filas/mensagens/lotes) ─
   app.get('/monitor', { preHandler: requirePanelAuth }, async (request, reply) => {
     const isAdmin = isSuperAdmin(request)
     const ownerUserId = memberScopeId(request)
-    const [queues, messages, campaigns] = await Promise.all([
+    const f = monitorFilters(request)
+    const [queues, messages, campaigns, instances] = await Promise.all([
       isAdmin ? getQueueStats() : Promise.resolve(null),
-      getRecentMessages({ apiClientId: request.apiClient!.id, ownerUserId, limit: 25 }),
+      getRecentMessages({ apiClientId: request.apiClient!.id, ownerUserId, limit: 25, ...f }),
       getCampaignProgress({ apiClientId: request.apiClient!.id, ownerUserId, limit: 20 }),
+      listInstances(request.apiClient!.id, ownerUserId),
     ])
     return renderPage(
       app,
       reply,
       'monitor',
-      { title: 'Monitor — ApiEnvios', isSuperAdmin: isAdmin, queues, messages, campaigns },
+      {
+        title: 'Monitor — ApiEnvios',
+        isSuperAdmin: isAdmin,
+        queues,
+        messages,
+        campaigns,
+        // opções do dropdown de instância + status atual dos filtros
+        instances: instances.map((i) => ({ id: i.id, name: i.name, slug: i.slug })),
+        statuses: MSG_STATUSES,
+        filterStatus: f.status ?? '',
+        filterInstanceId: f.instanceId ?? '',
+      },
       { user: request.authUser, isAdmin, isOwner: isPanelOwner(request), activeNav: 'monitor' },
     )
   })
 
-  // ── GET /monitor/data — JSON para o auto-refresh (Alpine) ─────
+  // ── GET /monitor/data — JSON para o auto-refresh (Alpine), com filtros ─
   app.get('/monitor/data', { preHandler: requirePanelAuth }, async (request, reply) => {
     const isAdmin = isSuperAdmin(request)
     const ownerUserId = memberScopeId(request)
+    const f = monitorFilters(request)
     const [queues, messages, campaigns] = await Promise.all([
       isAdmin ? getQueueStats() : Promise.resolve(null),
-      getRecentMessages({ apiClientId: request.apiClient!.id, ownerUserId, limit: 25 }),
+      getRecentMessages({ apiClientId: request.apiClient!.id, ownerUserId, limit: 25, ...f }),
       getCampaignProgress({ apiClientId: request.apiClient!.id, ownerUserId, limit: 20 }),
     ])
     return reply.send({ queues, messages, campaigns })
@@ -560,6 +585,7 @@ export async function panelRoutes(app: FastifyInstance) {
             type: 'TEXT',
             content: parsed.data.body,
             status: 'QUEUED',
+            createdByUserId: request.authUser?.id,
           },
         })
         await enqueueSend(message.id, message.maxRetries)

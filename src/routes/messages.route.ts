@@ -93,6 +93,7 @@ export async function messagesRoutes(app: FastifyInstance) {
             caption: payload.caption,
             scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : undefined,
             status: isScheduled ? 'SCHEDULED' : 'QUEUED',
+            createdByUserId: request.authUser?.id, // null se for envio por API key/token
           },
         })
 

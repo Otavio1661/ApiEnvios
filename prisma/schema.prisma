@@ -150,6 +150,10 @@ model Message {
   campaignId      String?
   campaign        Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
+  // Usuário humano que disparou (login JWT). null = envio por API key/token (máquina).
+  createdByUserId String?
+  createdByUser   User?         @relation("MessageSender", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
   // Status
   status          MessageStatus @default(QUEUED)
   errorMessage    String?
@@ -176,6 +180,7 @@ model Message {
   @@index([apiClientId, createdAt])
   @@index([numberId])
   @@index([campaignId])
+  @@index([createdByUserId])
 }
 
 // ─────────────────────────────────────────────
@@ -302,6 +307,9 @@ model User {
 
   // Instâncias das quais este usuário é dono (escopo do MEMBER).
   ownedInstances Instance[] @relation("InstanceOwner")
+
+  // Mensagens que este usuário disparou (para auditoria/monitor).
+  sentMessages   Message[]  @relation("MessageSender")
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

@@ -97,6 +97,7 @@ export async function campaignsRoutes(app: FastifyInstance) {
             content,
             caption: payload.caption,
             status: 'QUEUED',
+            createdByUserId: request.authUser?.id,
           },
         })
         await enqueueSend(message.id, message.maxRetries)
