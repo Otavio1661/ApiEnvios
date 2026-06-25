@@ -21,6 +21,7 @@
         <a href="/admin/docs" class="nav-link <%= it.activeNav === 'docs' ? 'active' : '' %>">Docs</a>
         <% if (it.isOwner) { %>
         <a href="/admin/team" class="nav-link <%= it.activeNav === 'team' ? 'active' : '' %>">Time</a>
+        <a href="/admin/webhooks" class="nav-link <%= it.activeNav === 'webhooks' ? 'active' : '' %>">Webhooks</a>
         <% } %>
         <% if (it.isAdmin) { %>
         <a href="/admin/manage" class="nav-link <%= it.activeNav === 'manage' ? 'active' : '' %>">Gestão</a>

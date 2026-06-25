@@ -1,0 +1,73 @@
+<div class="page-head">
+  <div>
+    <a href="/admin" class="muted">&larr; Voltar</a>
+    <h1>Webhooks</h1>
+    <p class="muted">Receba eventos da plataforma no seu sistema (com retry automático e assinatura HMAC quando há segredo).</p>
+  </div>
+</div>
+
+<% if (it.ok) { %><div class="alert alert-ok"><%= it.ok %></div><% } %>
+<% if (it.err) { %><div class="alert alert-error"><%= it.err %></div><% } %>
+
+<div class="card">
+  <h2>Novo webhook</h2>
+  <form method="POST" action="/admin/webhooks" class="form">
+    <label class="field">
+      <span>URL de destino *</span>
+      <input type="url" name="url" placeholder="https://seu-sistema.com/hook" required />
+    </label>
+    <label class="field">
+      <span>Segredo (opcional — habilita assinatura HMAC, mín. 8)</span>
+      <input type="text" name="secret" minlength="8" placeholder="ex: um-segredo-forte-aqui" autocomplete="off" />
+    </label>
+    <div class="field">
+      <span>Eventos *</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px">
+        <% it.events.forEach(function(ev){ %>
+          <label class="field-check" style="margin:0">
+            <input type="checkbox" name="events" value="<%= ev %>" />
+            <span><code><%= ev %></code></span>
+          </label>
+        <% }) %>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Cadastrar webhook</button>
+  </form>
+  <p class="muted" style="margin-top:10px">Eventos: <code>BAN_DETECTED</code> (número banido), <code>NUMBER_DISCONNECTED</code> (caiu), <code>NUMBER_ROTATED</code> (rodízio), <code>MESSAGE_FAILED</code>, <code>MESSAGE_DELIVERED</code>, <code>PROVIDER_DOWN</code>.</p>
+</div>
+
+<div class="card">
+  <h2>Webhooks cadastrados (<%= it.webhooks.length %>)</h2>
+  <table class="instances-table">
+    <thead>
+      <tr><th>URL</th><th>Eventos</th><th>Assinado</th><th>Ativo</th><th>Última chamada</th><th>Falhas</th><th>Ações</th></tr>
+    </thead>
+    <tbody>
+      <% if (it.webhooks.length === 0) { %>
+        <tr><td colspan="7" class="muted center">Nenhum webhook ainda.</td></tr>
+      <% } %>
+      <% it.webhooks.forEach(function(w){ %>
+        <tr>
+          <td><code><%= w.url %></code></td>
+          <td><% w.events.forEach(function(e){ %><span class="badge badge-msg" style="margin:1px"><%= e %></span><% }) %></td>
+          <td><%= w.hasSecret ? '🔒 sim' : '—' %></td>
+          <td><%= w.active ? 'Sim' : 'Não' %></td>
+          <td class="muted"><%= w.lastCalledAt ? new Date(w.lastCalledAt).toLocaleString('pt-BR') : '—' %></td>
+          <td><%= w.failCount %></td>
+          <td style="display:flex;gap:4px;flex-wrap:wrap">
+            <form method="POST" action="/admin/webhooks/<%= w.id %>/test" class="inline">
+              <button type="submit" class="btn btn-ghost" title="Enfileira um evento de teste">Testar</button>
+            </form>
+            <form method="POST" action="/admin/webhooks/<%= w.id %>/toggle" class="inline">
+              <button type="submit" class="btn btn-ghost"><%= w.active ? 'Desativar' : 'Ativar' %></button>
+            </form>
+            <form method="POST" action="/admin/webhooks/<%= w.id %>/delete" class="inline"
+                  onsubmit="return confirm('Remover este webhook?')">
+              <button type="submit" class="btn btn-ghost btn-danger">Remover</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

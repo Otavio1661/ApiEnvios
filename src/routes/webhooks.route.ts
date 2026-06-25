@@ -14,6 +14,7 @@ const webhookSchema = z.object({
   events: z.array(z.enum([
     'BAN_DETECTED',
     'NUMBER_ROTATED',
+    'NUMBER_DISCONNECTED',
     'MESSAGE_FAILED',
     'MESSAGE_DELIVERED',
     'PROVIDER_DOWN',

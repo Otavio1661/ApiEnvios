@@ -45,6 +45,7 @@ import {
 } from '../services/provisioning.service'
 import { deleteClientCascade, deleteInstanceCascade } from '../services/cascade-delete.service'
 import { getQueueStats, getRecentMessages, getCampaignProgress } from '../services/monitor.service'
+import { enqueueWebhookDelivery } from '../queues/webhook.queue'
 
 // Nome do cookie de sessão do painel (mesmo JWT da API).
 const COOKIE_NAME = 'token'
@@ -203,6 +204,21 @@ const teamEditSchema = z
 // Atribuição de dono de instância (OWNER): id do membro, ou vazio para remover o dono.
 const assignOwnerSchema = z.object({
   ownerUserId: z.string().min(1).nullable(),
+})
+
+// Webhooks (OWNER): eventos disponíveis + schema de criação pelo painel.
+const WEBHOOK_EVENTS = [
+  'BAN_DETECTED',
+  'NUMBER_ROTATED',
+  'NUMBER_DISCONNECTED',
+  'MESSAGE_FAILED',
+  'MESSAGE_DELIVERED',
+  'PROVIDER_DOWN',
+] as const
+const panelWebhookSchema = z.object({
+  url: z.string().url('URL inválida.'),
+  events: z.array(z.enum(WEBHOOK_EVENTS)).min(1, 'Selecione ao menos um evento.'),
+  secret: z.string().min(8, 'O segredo deve ter ao menos 8 caracteres.').optional(),
 })
 
 // Normaliza valores de formulário HTML: strings vazias → undefined; checkbox → boolean.
@@ -1266,6 +1282,120 @@ export async function panelRoutes(app: FastifyInstance) {
 
       await deleteUser(target.id)
       return reply.redirect(`/admin/team?ok=${encodeURIComponent('Membro removido.')}`)
+    },
+  )
+
+  // ══════════════════════════════════════════════════════════
+  // OWNER — Webhooks da conta (criar/ativar/testar/remover).
+  // Guard: requirePanelOwner. Escopo sempre em request.apiClient.id.
+  // ══════════════════════════════════════════════════════════
+
+  // ── GET /webhooks — Página de gestão de webhooks ──────────
+  app.get<{ Querystring: { ok?: string; err?: string } }>(
+    '/webhooks',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      const webhooks = await prisma.webhook.findMany({
+        where: { apiClientId: request.apiClient!.id },
+        orderBy: { createdAt: 'desc' },
+      })
+      // Não expõe o segredo; só indica se há um configurado.
+      const safe = webhooks.map((w) => ({
+        id: w.id,
+        url: w.url,
+        events: w.events,
+        active: w.active,
+        hasSecret: Boolean(w.secret),
+        lastCalledAt: w.lastCalledAt,
+        failCount: w.failCount,
+      }))
+      return renderPage(
+        app,
+        reply,
+        'webhooks',
+        {
+          title: 'Webhooks — ApiEnvios',
+          webhooks: safe,
+          events: WEBHOOK_EVENTS,
+          ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
+          err: request.query.err ? decodeURIComponent(request.query.err) : null,
+        },
+        { user: request.authUser, isAdmin: isSuperAdmin(request), isOwner: true, activeNav: 'webhooks' },
+      )
+    },
+  )
+
+  // ── POST /webhooks — Cadastra um webhook ──────────────────
+  app.post('/webhooks', { preHandler: requirePanelOwner }, async (request, reply) => {
+    const raw = (request.body ?? {}) as Record<string, unknown>
+    // Checkboxes HTML: um evento vem string, vários vêm array; nenhum vem undefined.
+    const events = Array.isArray(raw.events) ? raw.events : raw.events ? [raw.events] : []
+    const parsed = panelWebhookSchema.safeParse({
+      url: raw.url,
+      events,
+      secret: emptyToUndefined(raw.secret),
+    })
+    if (!parsed.success) {
+      const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
+      return reply.redirect(`/admin/webhooks?err=${encodeURIComponent(msg)}`)
+    }
+    try {
+      await prisma.webhook.create({
+        data: { ...parsed.data, apiClientId: request.apiClient!.id },
+      })
+      return reply.redirect(`/admin/webhooks?ok=${encodeURIComponent('Webhook cadastrado.')}`)
+    } catch (err: any) {
+      request.log.error(`[Painel] Falha ao criar webhook: ${err.message}`)
+      return reply.redirect(`/admin/webhooks?err=${encodeURIComponent('Falha ao cadastrar o webhook.')}`)
+    }
+  })
+
+  // ── POST /webhooks/:id/toggle — Ativa/desativa ────────────
+  app.post<{ Params: { id: string } }>(
+    '/webhooks/:id/toggle',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      const wh = await prisma.webhook.findFirst({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id },
+        select: { id: true, active: true },
+      })
+      if (!wh) return reply.redirect(`/admin/webhooks?err=${encodeURIComponent('Webhook não encontrado.')}`)
+      await prisma.webhook.update({ where: { id: wh.id }, data: { active: !wh.active } })
+      return reply.redirect(`/admin/webhooks?ok=${encodeURIComponent(wh.active ? 'Webhook desativado.' : 'Webhook ativado.')}`)
+    },
+  )
+
+  // ── POST /webhooks/:id/test — Envia um evento de teste ────
+  app.post<{ Params: { id: string } }>(
+    '/webhooks/:id/test',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      const wh = await prisma.webhook.findFirst({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id },
+        select: { id: true, events: true },
+      })
+      if (!wh) return reply.redirect(`/admin/webhooks?err=${encodeURIComponent('Webhook não encontrado.')}`)
+      // Enfileira uma entrega de teste (passa pela mesma esteira: retry + HMAC).
+      const event = (wh.events[0] as any) ?? 'BAN_DETECTED'
+      await enqueueWebhookDelivery(wh.id, event, {
+        event,
+        timestamp: new Date().toISOString(),
+        data: { test: true, message: 'Evento de teste do ApiEnvios' },
+      })
+      return reply.redirect(`/admin/webhooks?ok=${encodeURIComponent('Evento de teste enfileirado para entrega.')}`)
+    },
+  )
+
+  // ── POST /webhooks/:id/delete — Remove ────────────────────
+  app.post<{ Params: { id: string } }>(
+    '/webhooks/:id/delete',
+    { preHandler: requirePanelOwner },
+    async (request, reply) => {
+      const result = await prisma.webhook.deleteMany({
+        where: { id: request.params.id, apiClientId: request.apiClient!.id },
+      })
+      const ok = result.count > 0
+      return reply.redirect(`/admin/webhooks?${ok ? 'ok' : 'err'}=${encodeURIComponent(ok ? 'Webhook removido.' : 'Webhook não encontrado.')}`)
     },
   )
 }
