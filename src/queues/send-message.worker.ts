@@ -81,6 +81,20 @@ async function processJob(job: Job<SendJobData>) {
         errorMessage: null,
       },
     })
+
+    // Confirmação de SUCESSO (escopada ao tenant). Opt-in: só quem assina
+    // MESSAGE_DELIVERED recebe. Permite ao consumidor (ex.: alvará) confirmar o
+    // envio real — não o otimista do QUEUED. Dispara uma vez, no sucesso do envio.
+    await dispatchWebhook(
+      'MESSAGE_DELIVERED',
+      {
+        messageId: message.id,
+        to: message.toPhone,
+        provider: result.provider,
+        numberId: result.numberId ?? null,
+      },
+      message.apiClientId,
+    )
     return
   }
 
