@@ -60,6 +60,7 @@ model Instance {
   messages    Message[]
   rotations   NumberRotation[]
   numbers     InstanceNumber[]   // Fase C1: pool de números filhos (aditivo; lógica ainda usa os campos acima)
+  campaigns   Campaign[]         // lotes que tiveram esta instância como alvo
 
   @@unique([apiClientId, phone])
   @@unique([apiClientId, name])           // apelido único por tenant (NULLs distintos no Postgres)
@@ -145,6 +146,10 @@ model Message {
   provider        Provider?
   providerAttempt Int           @default(1)  // qual tentativa (1=evolution, 2=waha, 3=cloud)
 
+  // Lote (campanha) ao qual a mensagem pertence (envio em massa). Nullable.
+  campaignId      String?
+  campaign        Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
   // Status
   status          MessageStatus @default(QUEUED)
   errorMessage    String?
@@ -170,6 +175,31 @@ model Message {
   @@index([scheduledAt])
   @@index([apiClientId, createdAt])
   @@index([numberId])
+  @@index([campaignId])
+}
+
+// ─────────────────────────────────────────────
+// CAMPANHAS (lotes de envio em massa) — Message.campaignId aponta para cá.
+// ─────────────────────────────────────────────
+model Campaign {
+  id              String   @id @default(cuid())
+  name            String?                         // rótulo opcional do lote
+
+  apiClientId     String
+  apiClient       ApiClient @relation(fields: [apiClientId], references: [id])
+
+  // Instância alvo (opcional). SetNull: apagar a instância não apaga o lote.
+  instanceId      String?
+  instance        Instance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+
+  createdByUserId String?                         // usuário humano que disparou (informativo)
+  total           Int      @default(0)            // nº de mensagens enfileiradas no lote
+
+  createdAt       DateTime @default(now())
+
+  messages        Message[]
+
+  @@index([apiClientId, createdAt])
 }
 
 // ─────────────────────────────────────────────
@@ -250,6 +280,7 @@ model ApiClient {
   messages    Message[]
   webhooks    Webhook[]
   users       User[]
+  campaigns   Campaign[]
 
   @@index([apiKey])
 }

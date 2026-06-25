@@ -1,0 +1,113 @@
+<div class="page-head">
+  <div>
+    <h1>Monitor</h1>
+    <p class="subtitle">Acompanhamento ao vivo de filas, mensagens e campanhas. Atualiza sozinho a cada 4s.</p>
+  </div>
+  <span class="muted" x-data x-text="'Atualizado: ' + (window.__monitorUpdated || '—')"></span>
+</div>
+
+<script>
+  window.__MONITOR__ = {
+    isSuperAdmin: <%~ it.isSuperAdmin ? 'true' : 'false' %>,
+    queues: <%~ JSON.stringify(it.queues) %>,
+    messages: <%~ JSON.stringify(it.messages) %>,
+    campaigns: <%~ JSON.stringify(it.campaigns) %>
+  };
+  function monitorPanel() {
+    return {
+      isSuperAdmin: window.__MONITOR__.isSuperAdmin,
+      queues: window.__MONITOR__.queues,
+      messages: window.__MONITOR__.messages || [],
+      campaigns: window.__MONITOR__.campaigns || [],
+      _timer: null,
+      init() { this._timer = setInterval(() => this.refresh(), 4000); },
+      async refresh() {
+        try {
+          const r = await fetch('/admin/monitor/data');
+          if (!r.ok) return;
+          const d = await r.json();
+          this.queues = d.queues; this.messages = d.messages || []; this.campaigns = d.campaigns || [];
+          window.__monitorUpdated = new Date().toLocaleTimeString('pt-BR');
+        } catch (e) { /* silencioso */ }
+      },
+      fmt(s) { return s ? new Date(s).toLocaleString('pt-BR') : '—'; },
+      pct(c) { return c.total ? Math.round(((c.sent + c.failed) / c.total) * 100) : 0; }
+    }
+  }
+</script>
+
+<div x-data="monitorPanel()">
+
+  <!-- Filas (só super admin) -->
+  <% if (it.isSuperAdmin) { %>
+  <div class="card">
+    <h2>Filas (plataforma)</h2>
+    <p class="muted">Jobs em processamento no BullMQ (Redis). Visão global da plataforma.</p>
+    <table class="instances-table">
+      <thead><tr><th>Fila</th><th>Aguardando</th><th>Ativos</th><th>Atrasados</th><th>Concluídos</th><th>Falhos (DLQ)</th></tr></thead>
+      <tbody>
+        <template x-for="(q, name) in (queues || {})" :key="name">
+          <tr>
+            <td><strong x-text="name === 'sendMessage' ? 'Envio de mensagens' : (name === 'webhook' ? 'Webhooks' : name)"></strong></td>
+            <td x-text="q.waiting ?? 0"></td>
+            <td x-text="q.active ?? 0"></td>
+            <td x-text="q.delayed ?? 0"></td>
+            <td x-text="q.completed ?? 0"></td>
+            <td x-text="q.failed ?? 0"></td>
+          </tr>
+        </template>
+        <tr x-show="!queues"><td colspan="6" class="muted center">Sem dados de fila.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+
+  <!-- Campanhas (lotes) -->
+  <div class="card">
+    <h2>Campanhas (lotes)</h2>
+    <table class="instances-table">
+      <thead><tr><th>Lote</th><th>Instância</th><th>Progresso</th><th>Na fila</th><th>Enviadas</th><th>Falhas</th><th>Quando</th></tr></thead>
+      <tbody>
+        <template x-for="c in campaigns" :key="c.id">
+          <tr>
+            <td><strong x-text="c.name || ('Lote ' + c.id.slice(-6))"></strong></td>
+            <td class="muted" x-text="c.instance ? (c.instance.name || c.instance.slug) : '—'"></td>
+            <td style="min-width:140px">
+              <div style="background:var(--border);border-radius:6px;height:8px;overflow:hidden">
+                <div :style="'height:8px;width:' + pct(c) + '%;background:#2563eb'"></div>
+              </div>
+              <span class="muted" x-text="(c.sent + c.failed) + '/' + c.total + ' (' + pct(c) + '%)'"></span>
+            </td>
+            <td x-text="c.queued"></td>
+            <td x-text="c.sent"></td>
+            <td x-text="c.failed"></td>
+            <td class="muted" x-text="fmt(c.createdAt)"></td>
+          </tr>
+        </template>
+        <tr x-show="campaigns.length === 0"><td colspan="7" class="muted center">Nenhuma campanha ainda.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Mensagens recentes -->
+  <div class="card">
+    <h2>Mensagens recentes</h2>
+    <table class="instances-table">
+      <thead><tr><th>Destino</th><th>Tipo</th><th>Status</th><th>Instância</th><th>Quando</th><th>Erro</th></tr></thead>
+      <tbody>
+        <template x-for="m in messages" :key="m.id">
+          <tr>
+            <td x-text="m.toPhone"></td>
+            <td x-text="m.type"></td>
+            <td><span class="badge badge-msg" x-text="m.status"></span></td>
+            <td class="muted" x-text="m.instance ? (m.instance.name || m.instance.slug) : '—'"></td>
+            <td class="muted" x-text="fmt(m.createdAt)"></td>
+            <td class="muted" x-text="m.errorMessage || ''"></td>
+          </tr>
+        </template>
+        <tr x-show="messages.length === 0"><td colspan="6" class="muted center">Nenhuma mensagem ainda.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>

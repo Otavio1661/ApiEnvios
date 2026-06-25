@@ -105,6 +105,7 @@ export async function deleteClientCascade(
   await prisma.$transaction([
     prisma.messageAttempt.deleteMany({ where: { message: { apiClientId: clientId } } }),
     prisma.message.deleteMany({ where: { apiClientId: clientId } }),
+    prisma.campaign.deleteMany({ where: { apiClientId: clientId } }),
     prisma.numberRotation.deleteMany({ where: { instance: { apiClientId: clientId } } }),
     prisma.instance.deleteMany({ where: { apiClientId: clientId } }),
     prisma.webhook.deleteMany({ where: { apiClientId: clientId } }),

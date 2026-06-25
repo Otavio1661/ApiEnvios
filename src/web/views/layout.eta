@@ -17,6 +17,7 @@
       <a href="/admin" class="brand"><span class="brand-mark"></span> ApiEnvios</a>
       <nav class="nav-links">
         <a href="/admin" class="nav-link <%= it.activeNav === 'instances' ? 'active' : '' %>">Instâncias</a>
+        <a href="/admin/monitor" class="nav-link <%= it.activeNav === 'monitor' ? 'active' : '' %>">Monitor</a>
         <a href="/admin/docs" class="nav-link <%= it.activeNav === 'docs' ? 'active' : '' %>">Docs</a>
         <% if (it.isOwner) { %>
         <a href="/admin/team" class="nav-link <%= it.activeNav === 'team' ? 'active' : '' %>">Time</a>

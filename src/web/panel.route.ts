@@ -44,6 +44,7 @@ import {
   updateUser,
 } from '../services/provisioning.service'
 import { deleteClientCascade, deleteInstanceCascade } from '../services/cascade-delete.service'
+import { getQueueStats, getRecentMessages, getCampaignProgress } from '../services/monitor.service'
 
 // Nome do cookie de sessão do painel (mesmo JWT da API).
 const COOKIE_NAME = 'token'
@@ -324,6 +325,36 @@ export async function panelRoutes(app: FastifyInstance) {
       )
     },
   )
+
+  // ── GET /monitor — Painel de monitoramento (filas/mensagens/lotes) ─
+  app.get('/monitor', { preHandler: requirePanelAuth }, async (request, reply) => {
+    const isAdmin = isSuperAdmin(request)
+    const ownerUserId = memberScopeId(request)
+    const [queues, messages, campaigns] = await Promise.all([
+      isAdmin ? getQueueStats() : Promise.resolve(null),
+      getRecentMessages({ apiClientId: request.apiClient!.id, ownerUserId, limit: 25 }),
+      getCampaignProgress({ apiClientId: request.apiClient!.id, ownerUserId, limit: 20 }),
+    ])
+    return renderPage(
+      app,
+      reply,
+      'monitor',
+      { title: 'Monitor — ApiEnvios', isSuperAdmin: isAdmin, queues, messages, campaigns },
+      { user: request.authUser, isAdmin, isOwner: isPanelOwner(request), activeNav: 'monitor' },
+    )
+  })
+
+  // ── GET /monitor/data — JSON para o auto-refresh (Alpine) ─────
+  app.get('/monitor/data', { preHandler: requirePanelAuth }, async (request, reply) => {
+    const isAdmin = isSuperAdmin(request)
+    const ownerUserId = memberScopeId(request)
+    const [queues, messages, campaigns] = await Promise.all([
+      isAdmin ? getQueueStats() : Promise.resolve(null),
+      getRecentMessages({ apiClientId: request.apiClient!.id, ownerUserId, limit: 25 }),
+      getCampaignProgress({ apiClientId: request.apiClient!.id, ownerUserId, limit: 20 }),
+    ])
+    return reply.send({ queues, messages, campaigns })
+  })
 
   // ── GET /docs — Documentação da API (exemplos JS/PHP/cURL) ─────
   app.get('/docs', { preHandler: requirePanelAuth }, async (request, reply) => {
