@@ -158,21 +158,6 @@
 </div>
 
 <div class="card">
-  <div class="page-head" style="margin-bottom:8px">
-    <h2 style="margin:0">Como enviar por esta instância</h2>
-    <a href="/admin/docs" class="back-link">Ver documentação completa →</a>
-  </div>
-  <p class="muted">Use o token desta instância no header <code>Token</code>. O roteador escolhe o melhor número conectado do pool.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.instance.id %>/messages/chat" \
-  -H "Token: <%= it.instance.token %>" \
-  -H "Content-Type: application/json" \
-  -d '{"to":"5544999990000","body":"Olá!"}'</code></pre>
-  </div>
-</div>
-
-<div class="card">
   <h2>Últimas mensagens</h2>
   <table class="instances-table">
     <thead>
@@ -204,6 +189,223 @@
     </tbody>
   </table>
 </div>
+
+<div class="card">
+  <div class="page-head" style="margin-bottom:8px">
+    <h2 style="margin:0">Como enviar por esta instância</h2>
+    <a href="/admin/docs" class="back-link">Ver documentação completa →</a>
+  </div>
+  <p class="muted">Use o token desta instância no header <code>Token</code>. O roteador escolhe o melhor número conectado do pool.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.instance.id %>/messages/chat" \
+  -H "Token: <%= it.instance.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","body":"Olá!"}'</code></pre>
+  </div>
+</div>
+
+<% if (it.numbers.some(function(n){ return n.provider === 'WUZAPI' })) { %>
+<div class="card" x-data="{ t: 'envios' }">
+  <h2>Testar recursos do WuzAPI</h2>
+  <p class="muted">Chamadas <strong>reais</strong> pela API pública, usando o token desta instância — direto daqui, sem precisar copiar/colar em outra ferramenta. Envios entram na fila normalmente (acompanhe em "Últimas mensagens" acima); ações são imediatas.</p>
+
+  <div class="tabs">
+    <button type="button" class="tab" :class="t==='envios' && 'active'" @click="t='envios'">Envios</button>
+    <button type="button" class="tab" :class="t==='acoes' && 'active'" @click="t='acoes'">Ações</button>
+  </div>
+
+  <div x-show="t==='envios'">
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/messages/send', 'POST', {
+        to: '5544999990000', text: 'Seu pedido está pronto! O que deseja fazer?',
+        footer: 'Responda uma das opções abaixo',
+        buttons: JSON.stringify([
+          { type: 'quickreply', displayText: 'Confirmar' },
+          { type: 'quickreply', displayText: 'Cancelar' },
+          { type: 'url', displayText: 'Ver detalhes', url: 'https://exemplo.com/pedido/123' }
+        ], null, 2)
+      })" class="wuz-form">
+      <h3>Botões interativos</h3>
+      <div class="form">
+        <div class="grid-2">
+          <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+          <label class="field"><span>footer (opcional)</span><input type="text" x-model="fields.footer" /></label>
+        </div>
+        <label class="field"><span>text</span><input type="text" x-model="fields.text" /></label>
+        <label class="field"><span>buttons (JSON — até 3 quickreply + 1 url + 1 call)</span><textarea rows="6" x-model="fields.buttons"></textarea></label>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, type: 'BUTTONS', text: fields.text, footer: fields.footer || undefined, buttons: JSON.parse(fields.buttons) }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/messages/send', 'POST', {
+        to: '5544999990000', latitude: '-23.5505', longitude: '-46.6333', locationName: 'Nossa loja'
+      })" class="wuz-form">
+      <h3>Localização</h3>
+      <div class="form">
+        <div class="grid-2">
+          <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+          <label class="field"><span>locationName (opcional)</span><input type="text" x-model="fields.locationName" /></label>
+          <label class="field"><span>latitude</span><input type="text" x-model="fields.latitude" /></label>
+          <label class="field"><span>longitude</span><input type="text" x-model="fields.longitude" /></label>
+        </div>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, type: 'LOCATION', latitude: Number(fields.latitude), longitude: Number(fields.longitude), locationName: fields.locationName || undefined }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/messages/send', 'POST', {
+        to: '5544999990000', contactName: 'Suporte Loja X', contactPhone: '5544988880000'
+      })" class="wuz-form">
+      <h3>Contato (vCard)</h3>
+      <div class="form">
+        <div class="grid-2">
+          <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+          <label class="field"><span>contactName</span><input type="text" x-model="fields.contactName" /></label>
+          <label class="field"><span>contactPhone</span><input type="text" x-model="fields.contactPhone" /></label>
+        </div>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, type: 'CONTACT', contactName: fields.contactName, contactPhone: fields.contactPhone }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/messages/send', 'POST', {
+        to: '5544999990000', text: 'Qual sua cor favorita?', pollOptions: 'Azul, Verde, Vermelho'
+      })" class="wuz-form">
+      <h3>Enquete</h3>
+      <div class="form">
+        <div class="grid-2">
+          <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+          <label class="field"><span>text (pergunta)</span><input type="text" x-model="fields.text" /></label>
+        </div>
+        <label class="field"><span>pollOptions (2 a 12, separadas por vírgula)</span><input type="text" x-model="fields.pollOptions" /></label>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, type: 'POLL', text: fields.text, pollOptions: fields.pollOptions.split(',').map(function(s){ return s.trim() }).filter(Boolean) }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/messages/send', 'POST', {
+        to: '5544999990000', mediaUrl: 'https://exemplo.com/figurinha.webp'
+      })" class="wuz-form">
+      <h3>Figurinha (sticker)</h3>
+      <div class="form">
+        <div class="grid-2">
+          <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+          <label class="field"><span>mediaUrl (.webp)</span><input type="text" x-model="fields.mediaUrl" /></label>
+        </div>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, type: 'STICKER', mediaUrl: fields.mediaUrl }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="t==='acoes'" x-cloak>
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/actions/presence', 'POST', { to: '5544999990000', state: 'typing' })" class="wuz-form">
+      <h3>Presença (digitando / gravando)</h3>
+      <div class="form">
+        <div class="grid-2">
+          <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+          <label class="field"><span>state</span>
+            <select x-model="fields.state">
+              <option value="typing">typing</option>
+              <option value="recording">recording</option>
+              <option value="paused">paused</option>
+            </select>
+          </label>
+        </div>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, state: fields.state }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/actions/react', 'POST', { to: '5544999990000', messageId: 'ID_DA_MENSAGEM', emoji: '👍' })" class="wuz-form">
+      <h3>Reagir com emoji</h3>
+      <div class="form">
+        <div class="grid-2">
+          <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+          <label class="field"><span>messageId</span><input type="text" x-model="fields.messageId" /></label>
+        </div>
+        <label class="field"><span>emoji (vazio remove a reação)</span><input type="text" x-model="fields.emoji" /></label>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, messageId: fields.messageId, emoji: fields.emoji || undefined }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/actions/read', 'POST', { to: '5544999990000', messageIds: 'ID_DA_MENSAGEM_1, ID_DA_MENSAGEM_2' })" class="wuz-form">
+      <h3>Marcar como lida</h3>
+      <div class="form">
+        <label class="field"><span>to</span><input type="text" x-model="fields.to" /></label>
+        <label class="field"><span>messageIds (separados por vírgula)</span><input type="text" x-model="fields.messageIds" /></label>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ to: fields.to, messageIds: fields.messageIds.split(',').map(function(s){ return s.trim() }).filter(Boolean) }))">
+          <span x-show="!loading">Enviar</span><span x-show="loading" x-cloak>Enviando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+
+    <div x-data="wuzForm('/v1/instance/<%= it.instance.id %>/actions/check-number', 'POST', { phones: '5544999990000, 5544988880000' })" class="wuz-form">
+      <h3>Verificar número no WhatsApp</h3>
+      <div class="form">
+        <label class="field"><span>phones (separados por vírgula)</span><input type="text" x-model="fields.phones" /></label>
+        <button type="button" class="btn btn-primary" :disabled="loading"
+          @click="submit(() => ({ phones: fields.phones.split(',').map(function(s){ return s.trim() }).filter(Boolean) }))">
+          <span x-show="!loading">Verificar</span><span x-show="loading" x-cloak>Verificando...</span>
+        </button>
+      </div>
+      <div class="alert" :class="result && result.ok ? 'alert-ok' : 'alert-error'" x-show="result" x-cloak style="margin-top:12px">
+        <strong x-text="'HTTP ' + (result && result.status)"></strong>
+        <pre x-text="resultText" class="wuz-result"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+<% } %>
 
 <div class="card">
   <h2>Zona de perigo</h2>
@@ -276,6 +478,54 @@
       startPolling() {
         this._statusTimer = setInterval(() => this.refreshStatus(), 3000)
         this._qrTimer = setInterval(() => this.refreshQr(), 5000)
+      },
+    }
+  }
+
+  // Playground "Testar recursos do WuzAPI": chamada real à API pública, autenticada
+  // pelo token DESTA instância (mesmo token já exibido em "Como enviar por esta
+  // instância" — não é uma exposição nova). Sem proxy: o navegador chama a API
+  // diretamente (domínio diferente do painel — a API libera CORS pra qualquer
+  // origem via @fastify/cors { origin: true }, então a chamada cross-origin funciona).
+  const WUZ_API_BASE = '<%= it.apiBase %>'
+  const WUZ_TOKEN = '<%= it.instance.token %>'
+
+  async function wuzSend(path, method, body) {
+    try {
+      const res = await fetch(WUZ_API_BASE + path, {
+        method,
+        headers: { 'Content-Type': 'application/json', Token: WUZ_TOKEN },
+        body: body ? JSON.stringify(body) : undefined,
+      })
+      let data = null
+      try { data = await res.json() } catch (e) { /* corpo vazio/não-JSON */ }
+      return { status: res.status, ok: res.ok, body: data }
+    } catch (e) {
+      return { status: 0, ok: false, body: { error: 'Erro de rede: ' + e.message } }
+    }
+  }
+
+  // Fábrica reaproveitada por cada card do playground: guarda os campos do
+  // formulário (fields), o resultado da última chamada e o estado de loading.
+  function wuzForm(path, method, fields) {
+    return {
+      fields,
+      loading: false,
+      result: null,
+      async submit(bodyBuilder) {
+        let body
+        try {
+          body = bodyBuilder()
+        } catch (e) {
+          this.result = { status: 0, ok: false, body: { error: 'Campo inválido: ' + e.message } }
+          return
+        }
+        this.loading = true
+        this.result = await wuzSend(path, method, body)
+        this.loading = false
+      },
+      get resultText() {
+        return this.result ? JSON.stringify(this.result.body, null, 2) : ''
       },
     }
   }
