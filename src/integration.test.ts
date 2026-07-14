@@ -114,7 +114,7 @@ describe('Isolamento entre tenants', () => {
     // O findMany de instâncias devolve só o que o where pediu — validamos o escopo.
     prismaMock.instance.findMany.mockImplementation(async (args: any) => {
       if (args?.where?.apiClientId === 'tenant-A') {
-        return [{ id: 'i-A', apiClientId: 'tenant-A', provider: 'WAHA', status: 'ACTIVE', priority: 0, token: 't', instanceId: null, name: null, phone: null, connectionState: 'DISCONNECTED', qrCode: null, qrExpiresAt: null, sentToday: 0, sentTotal: 0, createdAt: new Date(), updatedAt: new Date(), lastSentAt: null, bannedAt: null, banReason: null, bannedCount: 0, maxRetries: 3 }]
+        return [{ id: 'i-A', apiClientId: 'tenant-A', provider: 'WUZAPI', status: 'ACTIVE', priority: 0, token: 't', instanceId: null, name: null, phone: null, connectionState: 'DISCONNECTED', qrCode: null, qrExpiresAt: null, sentToday: 0, sentTotal: 0, createdAt: new Date(), updatedAt: new Date(), lastSentAt: null, bannedAt: null, banReason: null, bannedCount: 0, maxRetries: 3 }]
       }
       return []
     })
@@ -134,16 +134,21 @@ describe('Isolamento entre tenants', () => {
 })
 
 describe('Inbound de status', () => {
+  // Cloud API: mapeamento de status inbound estável. (WuzAPI coberto logo abaixo.)
+  const cloudDeliveredPayload = {
+    entry: [{ changes: [{ value: { statuses: [{ id: 'PID', status: 'delivered' }] } }] }],
+  }
+
   it('aplica SENT → DELIVERED (status avança e grava deliveredAt)', async () => {
-    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'WAHA' })
+    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'CLOUD_API' })
     prismaMock.message.findFirst.mockResolvedValue({ id: 'msg-1', status: 'SENT', apiClientId: 'tenant-A', toPhone: '55', readAt: null, deliveredAt: null })
     prismaMock.message.update.mockResolvedValue({})
 
     app = await makeApp()
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/webhooks/inbound/waha/inst-1',
-      payload: { event: 'message.ack', payload: { id: 'PID', ackName: 'DEVICE' } },
+      url: '/v1/webhooks/inbound/cloud_api/inst-1',
+      payload: cloudDeliveredPayload,
     })
     expect(res.statusCode).toBe(200)
     expect(prismaMock.message.update).toHaveBeenCalledWith(
@@ -156,17 +161,41 @@ describe('Inbound de status', () => {
   })
 
   it('NÃO regride READ → DELIVERED (status não avança → sem update)', async () => {
-    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'WAHA' })
+    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'CLOUD_API' })
     prismaMock.message.findFirst.mockResolvedValue({ id: 'msg-1', status: 'READ', apiClientId: 'tenant-A', toPhone: '55', readAt: new Date(), deliveredAt: new Date() })
 
     app = await makeApp()
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/webhooks/inbound/waha/inst-1',
-      payload: { event: 'message.ack', payload: { id: 'PID', ackName: 'DEVICE' } },
+      url: '/v1/webhooks/inbound/cloud_api/inst-1',
+      payload: cloudDeliveredPayload,
     })
     expect(res.statusCode).toBe(200)
     expect(prismaMock.message.update).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('WuzAPI ReadReceipt (form-encoded) aplica SENT → DELIVERED', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'WUZAPI' })
+    prismaMock.message.findFirst.mockResolvedValue({ id: 'msg-1', status: 'SENT', apiClientId: 'tenant-A', toPhone: '55', readAt: null, deliveredAt: null })
+    prismaMock.message.update.mockResolvedValue({})
+
+    // Formato REAL do WuzAPI: corpo form-urlencoded com o evento em `jsonData`.
+    const jsonData = JSON.stringify({ type: 'ReadReceipt', state: 'Delivered', event: { MessageIDs: ['PID'] } })
+    app = await makeApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/inbound/wuzapi/inst-1',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: `instanceName=inst-1&userID=u1&jsonData=${encodeURIComponent(jsonData)}`,
+    })
+    expect(res.statusCode).toBe(200)
+    expect(prismaMock.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'msg-1' },
+        data: expect.objectContaining({ status: 'DELIVERED' }),
+      }),
+    )
     await app.close()
   })
 

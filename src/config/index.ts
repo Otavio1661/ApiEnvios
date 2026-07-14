@@ -41,10 +41,13 @@ export const config = {
       apiKey: process.env.EVOLUTION_API_KEY ?? '',
       enabled: Boolean(process.env.EVOLUTION_API_KEY),
     },
-    waha: {
-      url: process.env.WAHA_URL ?? 'http://localhost:3001',
-      apiKey: process.env.WAHA_API_KEY ?? '',
-      enabled: Boolean(process.env.WAHA_URL),
+    wuzapi: {
+      url: process.env.WUZAPI_URL ?? 'http://localhost:8888',
+      // Token de admin — usado só pra provisionar/apagar usuários (sessões).
+      // As operações de envio/QR usam o token do próprio usuário (guardado em
+      // Instance.instanceId), não este.
+      adminToken: process.env.WUZAPI_ADMIN_TOKEN ?? '',
+      enabled: Boolean(process.env.WUZAPI_URL),
     },
     cloudApi: {
       token: process.env.WA_CLOUD_TOKEN ?? '',
@@ -54,7 +57,7 @@ export const config = {
   },
 
   // Ordem de fallback dos providers (índice 0 = primeiro a tentar)
-  providerFallbackOrder: ['EVOLUTION', 'WAHA', 'CLOUD_API'] as const,
+  providerFallbackOrder: ['EVOLUTION', 'WUZAPI', 'CLOUD_API'] as const,
 
   sending: {
     delayMin: Number(process.env.SEND_DELAY_MIN ?? 2000),

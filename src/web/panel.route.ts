@@ -229,7 +229,7 @@ function emptyToUndefined(value: unknown): unknown {
 const createInstanceSchema = z.object({
   name: z.string().optional(),
   slug: slugSchema.optional(),
-  provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
+  provider: z.enum(['EVOLUTION', 'WUZAPI', 'CLOUD_API']),
 })
 
 // Renomear pelo painel: name e/ou slug (strings vazias viram undefined).
@@ -249,7 +249,7 @@ const testMessageSchema = z.object({
 
 // Adicionar número ao pool pelo painel (form HTML): provider + label opcional.
 const addNumberFormSchema = z.object({
-  provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
+  provider: z.enum(['EVOLUTION', 'WUZAPI', 'CLOUD_API']),
   label: z.string().min(1).optional(),
 })
 
@@ -434,11 +434,6 @@ export async function panelRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
       return reply.redirect(`/admin?err=${encodeURIComponent(msg)}`)
-    }
-
-    // WAHA é restrito ao super admin.
-    if (parsed.data.provider === 'WAHA' && !isSuperAdmin(request)) {
-      return reply.redirect(`/admin?err=${encodeURIComponent('O provider WAHA é restrito ao super admin.')}`)
     }
 
     try {
@@ -700,13 +695,6 @@ export async function panelRoutes(app: FastifyInstance) {
         const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
         return reply.redirect(
           `/admin/instances/${instance.id}?err=${encodeURIComponent(msg)}`,
-        )
-      }
-
-      // WAHA restrito ao super admin.
-      if (parsed.data.provider === 'WAHA' && !isSuperAdmin(request)) {
-        return reply.redirect(
-          `/admin/instances/${instance.id}?err=${encodeURIComponent('O provider WAHA é restrito ao super admin.')}`,
         )
       }
 

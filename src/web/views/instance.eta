@@ -56,7 +56,7 @@
     <h2>Números do pool</h2>
     <span class="muted">Enviadas hoje (total do pool): <strong><%= it.sentTodayTotal %></strong></span>
   </div>
-  <p class="muted">Cada número é uma sessão/conexão real do WhatsApp dentro deste pool. <strong>É por estes números que as mensagens são enviadas</strong> — o roteador escolhe automaticamente o melhor número conectado (rodízio anti-ban). Conecte cada número escaneando o QR (Evolution/WAHA) ou direto (Cloud API).</p>
+  <p class="muted">Cada número é uma sessão/conexão real do WhatsApp dentro deste pool. <strong>É por estes números que as mensagens são enviadas</strong> — o roteador escolhe automaticamente o melhor número conectado (rodízio anti-ban). Conecte cada número escaneando o QR (Evolution/WuzAPI) ou direto (Cloud API).</p>
 
   <% const algumConectado = it.numbers.some(function(n){ return n.connectionState === 'CONNECTED' }); %>
   <% if (it.numbers.length > 0 && !algumConectado) { %>
@@ -123,7 +123,7 @@
       <span>Provider</span>
       <select name="provider">
         <option value="EVOLUTION">Evolution</option>
-        <% if (it.isSuperAdmin) { %><option value="WAHA">WAHA (teste — super admin)</option><% } %>
+        <option value="WUZAPI">WuzAPI (botões interativos)</option>
         <option value="CLOUD_API">Cloud API</option>
       </select>
     </label>

@@ -37,31 +37,6 @@ describe('mapInboundStatus', () => {
     expect(update).toBeNull()
   })
 
-  // ── WAHA ────────────────────────────────────────────────────
-  it('mapeia message.ack da WAHA por ackName (DEVICE → DELIVERED)', () => {
-    const update = mapInboundStatus('WAHA', {
-      event: 'message.ack',
-      payload: { id: 'WAHA-1', ackName: 'DEVICE' },
-    })
-    expect(update).toEqual({ providerId: 'WAHA-1', status: 'DELIVERED' })
-  })
-
-  it('mapeia message.ack da WAHA pelo fallback numérico (3 → READ)', () => {
-    const update = mapInboundStatus('WAHA', {
-      event: 'message.ack',
-      payload: { id: 'WAHA-2', ack: 3 },
-    })
-    expect(update).toEqual({ providerId: 'WAHA-2', status: 'READ' })
-  })
-
-  it('mapeia session.status da WAHA (WORKING → CONNECTED)', () => {
-    const update = mapInboundStatus('WAHA', {
-      event: 'session.status',
-      payload: { status: 'WORKING' },
-    })
-    expect(update).toEqual({ providerId: '', connectionState: 'CONNECTED' })
-  })
-
   // ── Cloud API ───────────────────────────────────────────────
   it('mapeia statuses[] da Cloud API (delivered → DELIVERED)', () => {
     const update = mapInboundStatus('CLOUD_API', {
@@ -74,6 +49,49 @@ describe('mapInboundStatus', () => {
 
   it('retorna null para Cloud API sem statuses', () => {
     const update = mapInboundStatus('CLOUD_API', { entry: [{ changes: [{ value: {} }] }] })
+    expect(update).toBeNull()
+  })
+
+  // ── WuzAPI ──────────────────────────────────────────────────
+  // Formato REAL (capturado): form-encoded com o evento dentro de `jsonData` (string).
+  const wuz = (evt: object) => ({ instanceName: 'inst', jsonData: JSON.stringify(evt), userID: 'u1' })
+
+  it('mapeia ReadReceipt Delivered da WuzAPI (event.MessageIDs[0])', () => {
+    const update = mapInboundStatus('WUZAPI', wuz({
+      type: 'ReadReceipt', state: 'Delivered', event: { MessageIDs: ['WUZ-1', 'WUZ-2'] },
+    }))
+    expect(update).toEqual({ providerId: 'WUZ-1', status: 'DELIVERED' })
+  })
+
+  it('mapeia ReadReceipt Read da WuzAPI (Read → READ)', () => {
+    const update = mapInboundStatus('WUZAPI', wuz({
+      type: 'ReadReceipt', state: 'Read', event: { MessageIDs: ['WUZ-3'] },
+    }))
+    expect(update).toEqual({ providerId: 'WUZ-3', status: 'READ' })
+  })
+
+  it('mapeia Connected da WuzAPI (→ CONNECTED)', () => {
+    const update = mapInboundStatus('WUZAPI', wuz({ type: 'Connected', event: {} }))
+    expect(update).toEqual({ providerId: '', connectionState: 'CONNECTED' })
+  })
+
+  it('mapeia LoggedOut da WuzAPI (→ DISCONNECTED)', () => {
+    const update = mapInboundStatus('WUZAPI', wuz({ type: 'LoggedOut', event: {} }))
+    expect(update).toEqual({ providerId: '', connectionState: 'DISCONNECTED' })
+  })
+
+  it('mapeia QR da WuzAPI (qrCodeBase64 → qrCode)', () => {
+    const update = mapInboundStatus('WUZAPI', wuz({ type: 'QR', qrCodeBase64: 'data:image/png;base64,ABC' }))
+    expect(update).toEqual({ providerId: '', qrCode: 'data:image/png;base64,ABC' })
+  })
+
+  it('retorna null para evento irrelevante da WuzAPI (Presence)', () => {
+    const update = mapInboundStatus('WUZAPI', wuz({ type: 'Presence', event: {} }))
+    expect(update).toBeNull()
+  })
+
+  it('retorna null para ReadReceipt da WuzAPI sem MessageIDs', () => {
+    const update = mapInboundStatus('WUZAPI', wuz({ type: 'ReadReceipt', state: 'Delivered', event: {} }))
     expect(update).toBeNull()
   })
 

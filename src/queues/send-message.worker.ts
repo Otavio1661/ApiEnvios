@@ -9,7 +9,7 @@ import { prisma } from '../utils/prisma'
 import { sendViaInstance, sendWithFallback } from '../services/provider-router.service'
 import { dispatchWebhook } from '../services/notification.service'
 import { logger } from '../utils/logger'
-import type { SendMessagePayload } from '../types'
+import type { SendMessagePayload, WhatsappButton } from '../types'
 
 let worker: Worker<SendJobData> | null = null
 
@@ -41,12 +41,21 @@ async function processJob(job: Job<SendJobData>) {
     data: { status: 'SENDING', retryCount: attemptNumber - 1 },
   })
 
+  // BUTTONS: content = corpo do texto, e a estrutura {footer, buttons} vem do
+  // campo Json `buttons`. Demais tipos: TEXT usa content como texto; mídia usa
+  // content como URL.
+  const isButtons = message.type === 'BUTTONS'
+  const isText = message.type === 'TEXT'
+  const buttonsData = (message.buttons ?? {}) as { footer?: string; buttons?: WhatsappButton[] }
+
   const payload: SendMessagePayload = {
     to: message.toPhone,
     type: message.type,
-    text: message.type === 'TEXT' ? message.content : undefined,
-    mediaUrl: message.type === 'TEXT' ? undefined : message.content,
+    text: isText || isButtons ? message.content : undefined,
+    mediaUrl: isText || isButtons ? undefined : message.content,
     caption: message.caption ?? undefined,
+    buttons: isButtons ? buttonsData.buttons : undefined,
+    footer: isButtons ? buttonsData.footer : undefined,
   }
 
   const start = Date.now()

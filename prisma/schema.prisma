@@ -133,8 +133,10 @@ model Message {
 
   // Conteúdo
   type            MessageType   @default(TEXT)
-  content         String                 // texto ou URL da mídia
+  content         String                 // texto, URL da mídia, ou corpo do botão
   caption         String?                // legenda para mídias
+  // Interativo (type=BUTTONS): { footer?, buttons: [{displayText, type, url?, phoneNumber?}] }
+  buttons         Json?
 
   // Roteamento
   providerId      String?                // ID no provider (ex: message id do Evolution)
@@ -346,7 +348,7 @@ model Webhook {
 // ─────────────────────────────────────────────
 enum Provider {
   EVOLUTION   // Evolution API (principal)
-  WAHA        // WAHA - fallback gratuito
+  WUZAPI      // WuzAPI (Go/whatsmeow) - suporta botões interativos
   CLOUD_API   // WhatsApp Cloud API oficial - fallback pago
 }
 
@@ -394,6 +396,7 @@ enum MessageType {
   AUDIO
   DOCUMENT
   STICKER
+  BUTTONS     // mensagem interativa com botões (só via WuzAPI)
 }
 
 enum RotationReason {

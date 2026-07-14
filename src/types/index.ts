@@ -39,7 +39,7 @@ declare module '@fastify/jwt' {
   }
 }
 
-export type Provider = 'EVOLUTION' | 'WAHA' | 'CLOUD_API'
+export type Provider = 'EVOLUTION' | 'WUZAPI' | 'CLOUD_API'
 
 export type MessageStatus = 
   | 'QUEUED' 
@@ -51,17 +51,25 @@ export type MessageStatus =
   | 'SCHEDULED'
   | 'CANCELLED'
 
-export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER'
+export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'BUTTONS'
 
 export type NumberStatus = 'ACTIVE' | 'WARMING' | 'BANNED' | 'SUSPENDED' | 'RETIRED'
+
+// ── Botão interativo (type=BUTTONS) — só WuzAPI suporta ───────
+export type WhatsappButton =
+  | { displayText: string; type: 'quickreply' }
+  | { displayText: string; type: 'url'; url: string }
+  | { displayText: string; type: 'call'; phoneNumber: string }
 
 // ── Payload de envio recebido pelos clientes ──────────────────
 export interface SendMessagePayload {
   to: string              // número destino com DDI: "5544999990000"
   type: MessageType
-  text?: string           // para tipo TEXT
+  text?: string           // para tipo TEXT (ou corpo do BUTTONS)
   mediaUrl?: string       // para IMAGE, VIDEO, AUDIO, DOCUMENT
   caption?: string        // legenda para mídia
+  buttons?: WhatsappButton[]  // para type=BUTTONS
+  footer?: string             // rodapé opcional do BUTTONS
   externalId?: string     // ID do sistema cliente para idempotência
   scheduledAt?: string    // ISO 8601 para agendamento
 }
@@ -81,6 +89,8 @@ export interface IWhatsappProvider {
   
   sendText(instanceId: string, to: string, text: string): Promise<ProviderSendResult>
   sendMedia(instanceId: string, to: string, mediaUrl: string, caption?: string, type?: MessageType): Promise<ProviderSendResult>
+  /** Mensagem interativa com botões. Opcional — só providers que suportam (WuzAPI) implementam. */
+  sendButtons?(instanceId: string, to: string, body: string, buttons: WhatsappButton[], footer?: string): Promise<ProviderSendResult>
   getInstanceStatus(instanceId: string): Promise<InstanceStatus>
   createInstance(instanceId: string): Promise<{ instanceId: string; qrCode?: string }>
   /** Conecta/reconecta uma instância JÁ criada e retorna o QR atual. */

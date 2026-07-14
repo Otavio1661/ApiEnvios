@@ -23,8 +23,7 @@ export class InstanceError extends Error {
       | 'SLUG_TAKEN'
       | 'NOT_FOUND'
       | 'INVALID_SLUG'
-      | 'QUOTA_EXCEEDED'
-      | 'WAHA_RESTRICTED',
+      | 'QUOTA_EXCEEDED',
   ) {
     super(message)
     this.name = 'InstanceError'
@@ -397,8 +396,8 @@ export async function connectInstance(
   }
 
   // Webhook ANTES e DEPOIS de criar/renovar a sessão (mesma razão de connectNumber):
-  // WAHA precisa do pendingWebhookUrl antes do create; Evolution só aceita setWebhook
-  // após a sessão `inst-<id>` existir. registerInboundWebhook é best-effort (idempotente).
+  // Evolution só aceita setWebhook após a sessão `inst-<id>` existir; WuzAPI aceita
+  // a qualquer momento. registerInboundWebhook é best-effort (idempotente).
   await registerInboundWebhook(instance, log)
   const updated = await refreshQr(instance)
   await registerInboundWebhook(updated, log)
@@ -567,8 +566,6 @@ export async function connectNumber(
 
   // Webhook registrado ANTES e DEPOIS de criar/renovar a sessão, pois os providers
   // diferem:
-  //  - WAHA: o setWebhook precisa vir ANTES (guarda pendingWebhookUrl, que entra no
-  //    config da sessão criada em refreshQrNumber). A 2ª chamada é um PUT idempotente.
   //  - Evolution: a sessão `num-<id>` só existe APÓS refreshQrNumber; antes dela o
   //    setWebhook retorna 404 (best-effort, sem efeito). A 2ª chamada (com a sessão
   //    já criada) é a que efetivamente registra o webhook para o QRCODE_UPDATED.

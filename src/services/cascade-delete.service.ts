@@ -9,7 +9,7 @@
 // junto com a instância; Message/NumberRotation por numberId são SetNull.
 //
 // Efeitos colaterais best-effort (FORA da transação, pois tocam sistemas externos):
-//   - remoção da sessão no provider (WAHA/Evolution/CloudAPI)
+//   - remoção da sessão no provider (Evolution/WuzAPI/CloudAPI)
 //   - limpeza de chaves no Redis (contador anti-flood por destinatário + locks anti-ban)
 import type { FastifyBaseLogger } from 'fastify'
 import type { ApiClient, Instance, InstanceNumber } from '@prisma/client'

@@ -186,7 +186,7 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
 // ── Super admin (controle global da plataforma) ───────────────
 // Funciona nos dois modos de auth: via JWT (usuário com role SUPER_ADMIN) ou via
 // API key da conta ADMIN (admin-key). Centraliza a regra usada para bypass de
-// quota e visibilidade do provider WAHA.
+// quota e visibilidade de recursos administrativos.
 export function isSuperAdmin(request: FastifyRequest): boolean {
   // Humano (JWT/cookie do painel): decide ESTRITAMENTE pelo papel do usuário.
   // Assim, um usuário comum que por acaso pertence à conta ADMIN NÃO herda

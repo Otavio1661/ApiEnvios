@@ -9,7 +9,7 @@ const createNumberSchema = z.object({
   phone: z.string().min(10).max(15),
   label: z.string().optional(),
   name: z.string().optional(),
-  provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
+  provider: z.enum(['EVOLUTION', 'WUZAPI', 'CLOUD_API']),
   instanceId: z.string().optional(),
   priority: z.number().int().min(0).default(0),
 })

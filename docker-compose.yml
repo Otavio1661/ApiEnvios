@@ -74,24 +74,24 @@ services:
       redis:
         condition: service_healthy
 
-  # ── Provider 2: WAHA ────────────────────────────────────────
-  waha:
-    image: devlikeapro/waha:latest
-    container_name: apienvios_waha
+  # ── Provider 2: WuzAPI (Go/whatsmeow, botões interativos) ───
+  wuzapi:
+    image: asternic/wuzapi:latest
+    container_name: apienvios_wuzapi
     restart: unless-stopped
     networks:
       - apienvios_net
     ports:
-      - "3078:3000"
+      - "8082:8080"
     environment:
-      WHATSAPP_DEFAULT_ENGINE: NOWEB
-      WAHA_PRINT_QR: "false"
-      WAHA_API_KEY: "1c76189c459b4d90972c2fdea52de530"
-      WAHA_DASHBOARD_USERNAME: admin
-      WAHA_DASHBOARD_PASSWORD: admin123
-      WAHA_DASHBOARD_API_KEY: "1c76189c459b4d90972c2fdea52de530"
+      WUZAPI_ADMIN_TOKEN: "wuzapi-admin-dev-2026-aB7kR2mP"
+      # Chaves fixas: sem elas o WuzAPI gera aleatórias no boot e PERDE todos os
+      # tokens/sessões criptografados a cada restart do container.
+      WUZAPI_GLOBAL_ENCRYPTION_KEY: "wuzEnc2026xK9mP3qRaB7kR2mPzQ7wL2"
+      WUZAPI_GLOBAL_HMAC_KEY: "wuzHmac2026zQ7wL2nTxK9mP3qRaB7kR"
+      TZ: America/Sao_Paulo
     volumes:
-      - waha_data:/app/.sessions
+      - wuzapi_data:/app/dbdata
 
   # ── Aplicação principal ──────────────────────────────────────
   app:
@@ -119,8 +119,8 @@ services:
       REDIS_PASSWORD: ""
       EVOLUTION_API_URL: http://evolution_api:8080
       EVOLUTION_API_KEY: evolution-key-dev-123
-      WAHA_URL: http://waha:3000
-      WAHA_API_KEY: "1c76189c459b4d90972c2fdea52de530"
+      WUZAPI_URL: http://wuzapi:8080
+      WUZAPI_ADMIN_TOKEN: "wuzapi-admin-dev-2026-aB7kR2mP"
       WA_CLOUD_TOKEN: ""
       WA_CLOUD_PHONE_NUMBER_ID: ""
       WA_CLOUD_BUSINESS_ACCOUNT_ID: ""
@@ -144,4 +144,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  waha_data:
+  wuzapi_data:

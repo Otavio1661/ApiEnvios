@@ -36,7 +36,7 @@ import { slugSchema } from '../utils/slug'
 const createInstanceSchema = z.object({
   name: z.string().optional(),
   slug: slugSchema.optional(),
-  provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
+  provider: z.enum(['EVOLUTION', 'WUZAPI', 'CLOUD_API']),
   priority: z.number().int().min(0).default(0),
 })
 
@@ -61,7 +61,7 @@ const patchOwnerSchema = z.object({
 
 // Fase C2: adicionar número ao pool de uma instância.
 const addNumberSchema = z.object({
-  provider: z.enum(['EVOLUTION', 'WAHA', 'CLOUD_API']),
+  provider: z.enum(['EVOLUTION', 'WUZAPI', 'CLOUD_API']),
   label: z.string().optional(),
   priority: z.number().int().min(0).default(0),
 })
@@ -92,13 +92,6 @@ export async function instancesRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
       }
 
-      // WAHA é restrito ao super admin (uso de teste). Demais papéis: bloqueado.
-      if (body.data.provider === 'WAHA' && !isSuperAdmin(request)) {
-        return reply.status(403).send({
-          error: 'O provider WAHA é restrito ao super admin.',
-          code: 'WAHA_RESTRICTED',
-        })
-      }
 
       try {
         // Quota por conta (super admin ignora).
@@ -284,7 +277,7 @@ export async function instancesRoutes(app: FastifyInstance) {
       }
 
       // Registra o webhook inbound no provider (best-effort — não falha o connect).
-      // Para WAHA, deve vir ANTES do createInstance para entrar no config da sessão
+      // Alguns providers exigem o webhook ANTES do createInstance; outros (Evolution) só
       // (pendingWebhookUrl). Para Evolution, a sessão só existe após o refreshQr, então
       // re-registramos DEPOIS (a sessão inexistente faz o 1º setWebhook retornar 404).
       await registerInboundWebhook(instance, request.log)
@@ -292,7 +285,7 @@ export async function instancesRoutes(app: FastifyInstance) {
       try {
         const updated = await refreshQr(instance)
         // Pós-registro: agora a sessão existe no provider (Evolution grava o webhook;
-        // WAHA faz um PUT idempotente). Best-effort.
+        // aceitam depois. registerInboundWebhook é best-effort/idempotente.
         await registerInboundWebhook(updated, request.log)
         return reply.send({
           instanceId: updated.instanceId,
@@ -437,14 +430,6 @@ export async function instancesRoutes(app: FastifyInstance) {
 
       const instance = await findInstanceByIdOrSlug(request.params.id, request.apiClient!.id, memberScopeId(request))
       if (!instance) return reply.status(404).send({ error: 'Instância não encontrada' })
-
-      // WAHA restrito ao super admin.
-      if (body.data.provider === 'WAHA' && !isSuperAdmin(request)) {
-        return reply.status(403).send({
-          error: 'O provider WAHA é restrito ao super admin.',
-          code: 'WAHA_RESTRICTED',
-        })
-      }
 
       try {
         const number = await addNumber({

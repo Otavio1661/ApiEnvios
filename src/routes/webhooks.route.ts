@@ -65,7 +65,7 @@ export async function webhooksRoutes(app: FastifyInstance) {
 // ══════════════════════════════════════════════════════════════
 // WEBHOOKS INBOUND — callbacks dos providers (SEM auth por API key)
 // ══════════════════════════════════════════════════════════════
-// O provider (Evolution/WAHA/Cloud API) chama estes endpoints. Não há API key:
+// O provider (Evolution/WuzAPI/Cloud API) chama estes endpoints. Não há API key:
 // o escopo de tenant é garantido casando a Message por providerId + instance.apiClientId.
 // Respondemos sempre 200 rápido (exceto provider inválido) e processamos de forma
 // resiliente (try/catch — nunca 500), pois providers re-tentam e podem floodar.

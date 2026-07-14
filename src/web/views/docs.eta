@@ -252,7 +252,7 @@ curl -X PATCH "<%= it.apiBase %>/v1/admin/users/USER_ID" -H "x-api-key: <%= it.a
 curl "<%= it.apiBase %>/v1/admin/instances" -H "x-api-key: <%= it.apiKey %>"
 curl -X DELETE "<%= it.apiBase %>/v1/admin/instances/INST_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
   </div>
-  <p class="muted" style="margin-top:8px">Tudo isso também está na tela <a href="/admin/manage">Gestão</a>. O provider <strong>WAHA</strong> (teste) é restrito ao super admin.</p>
+  <p class="muted" style="margin-top:8px">Tudo isso também está na tela <a href="/admin/manage">Gestão</a>.</p>
 </div>
 <% } %>
 

@@ -22,9 +22,9 @@ vi.mock('../utils/prisma', () => ({ prisma: prismaMock }))
 
 // providers: cada provider com sendText/sendMedia mockados + isBanError real-ish.
 // isBanError simples: considera "banned"/"403"/"blocked" como ban (como o real).
-const { evolutionSend, wahaSend, cloudSend, notifyBan, isBanError } = vi.hoisted(() => ({
+const { evolutionSend, wuzapiSend, cloudSend, notifyBan, isBanError } = vi.hoisted(() => ({
   evolutionSend: vi.fn(),
-  wahaSend: vi.fn(),
+  wuzapiSend: vi.fn(),
   cloudSend: vi.fn(),
   notifyBan: vi.fn(async () => {}),
   isBanError: (msg: string) => /banned|403|blocked/i.test(msg),
@@ -33,7 +33,7 @@ const { evolutionSend, wahaSend, cloudSend, notifyBan, isBanError } = vi.hoisted
 vi.mock('../providers', () => ({
   providers: {
     EVOLUTION: { name: 'EVOLUTION', sendText: evolutionSend, sendMedia: evolutionSend, isBanError },
-    WAHA: { name: 'WAHA', sendText: wahaSend, sendMedia: wahaSend, isBanError },
+    WUZAPI: { name: 'WUZAPI', sendText: wuzapiSend, sendMedia: wuzapiSend, isBanError },
     CLOUD_API: { name: 'CLOUD_API', sendText: cloudSend, sendMedia: cloudSend },
   },
 }))
@@ -51,13 +51,13 @@ vi.mock('../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
 
-// Config: habilita EVOLUTION e WAHA; CLOUD_API desabilitada por padrão
+// Config: habilita EVOLUTION e WuzAPI; CLOUD_API desabilitada por padrão
 // (cada teste pode sobrescrever via spy se precisar).
 vi.mock('../config', () => ({
   config: {
     providers: {
       evolution: { enabled: true },
-      waha: { enabled: true },
+      wuzapi: { enabled: true },
       cloudApi: { enabled: false },
     },
     sending: { delayMin: 0, delayMax: 0, maxMessagesPerNumberDay: 200 },
@@ -267,7 +267,7 @@ describe('sendWithFallback (fallback opt-in por tenant)', () => {
     prismaMock.apiClient.findUnique.mockResolvedValueOnce({ id: 'tenant-1', fallbackEnabled: false })
     prismaMock.instance.findMany.mockResolvedValueOnce([
       makeInstance({ id: 'A', provider: 'EVOLUTION' }),
-      makeInstance({ id: 'B', provider: 'WAHA' }),
+      makeInstance({ id: 'B', provider: 'WUZAPI' }),
     ])
     // Pool da 1ª instância: 1 número Evolution que falha (erro comum).
     prismaMock.instanceNumber.findMany.mockResolvedValueOnce([
@@ -279,34 +279,34 @@ describe('sendWithFallback (fallback opt-in por tenant)', () => {
     const res = await sendWithFallback('tenant-1', payload)
 
     expect(res.success).toBe(false)
-    // A WAHA (2ª instância) NUNCA é consultada quando o fallback está desligado.
-    expect(wahaSend).not.toHaveBeenCalled()
+    // A WuzAPI (2ª instância) NUNCA é consultada quando o fallback está desligado.
+    expect(wuzapiSend).not.toHaveBeenCalled()
   })
 
   it('COM fallback: 1ª instância falha, cai para a 2ª do tenant e sucede', async () => {
     prismaMock.apiClient.findUnique.mockResolvedValueOnce({ id: 'tenant-1', fallbackEnabled: true })
     prismaMock.instance.findMany.mockResolvedValueOnce([
       makeInstance({ id: 'A', provider: 'EVOLUTION' }),
-      makeInstance({ id: 'B', provider: 'WAHA' }),
+      makeInstance({ id: 'B', provider: 'WUZAPI' }),
     ])
-    // Pool da instância A (Evolution, falha) e depois o da B (WAHA, sucesso).
+    // Pool da instância A (Evolution, falha) e depois o da B (WuzAPI, sucesso).
     prismaMock.instanceNumber.findMany
       .mockResolvedValueOnce([makeNumber({ id: 'numA', instanceId: 'A', provider: 'EVOLUTION' })])
       .mockResolvedValueOnce([
-        makeNumber({ id: 'numB', instanceId: 'B', provider: 'WAHA', providerInstanceId: 'waha-1' }),
+        makeNumber({ id: 'numB', instanceId: 'B', provider: 'WUZAPI', providerInstanceId: 'wuzapi-1' }),
       ])
     prismaMock.instanceNumber.update.mockResolvedValue({})
 
     evolutionSend.mockResolvedValueOnce({ success: false, error: 'erro temporário' })
-    wahaSend.mockResolvedValueOnce({ success: true, providerId: 'PID-WAHA' })
+    wuzapiSend.mockResolvedValueOnce({ success: true, providerId: 'PID-WUZAPI' })
 
     const res = await sendWithFallback('tenant-1', payload)
 
     expect(evolutionSend).toHaveBeenCalledTimes(1)
-    expect(wahaSend).toHaveBeenCalledTimes(1)
+    expect(wuzapiSend).toHaveBeenCalledTimes(1)
     expect(res.success).toBe(true)
-    expect(res.provider).toBe('WAHA')
-    expect(res.providerId).toBe('PID-WAHA')
+    expect(res.provider).toBe('WUZAPI')
+    expect(res.providerId).toBe('PID-WUZAPI')
     expect(res.numberId).toBe('numB')
   })
 

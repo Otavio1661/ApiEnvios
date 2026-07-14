@@ -25,7 +25,7 @@ const providersMock = vi.hoisted(() => ({
     setWebhook: vi.fn(),
     deleteInstance: vi.fn(),
   },
-  WAHA: {
+  WUZAPI: {
     createInstance: vi.fn(),
     connect: vi.fn(),
     getInstanceStatus: vi.fn(),
@@ -104,7 +104,7 @@ describe('createInstance — conflito de unicidade', () => {
     prismaMock.instance.create.mockRejectedValueOnce(p2002(['slug']))
 
     const err = await createInstance({
-      provider: 'WAHA',
+      provider: 'WUZAPI',
       slug: 'vendas',
       apiClientId: 'tenant-A',
     }).catch((e) => e)
@@ -118,7 +118,7 @@ describe('createInstance — conflito de unicidade', () => {
     prismaMock.instance.create.mockRejectedValueOnce(p2002(['apiClientId', 'name']))
 
     const err = await createInstance({
-      provider: 'WAHA',
+      provider: 'WUZAPI',
       name: 'Vendas',
       apiClientId: 'tenant-A',
     }).catch((e) => e)
@@ -158,9 +158,9 @@ describe('createNumber', () => {
 
   it('respeita priority informado', async () => {
     prismaMock.instanceNumber.create.mockResolvedValueOnce({ id: 'n-2' })
-    await createNumber({ instanceId: 'i-1', provider: 'WAHA', priority: 5 })
+    await createNumber({ instanceId: 'i-1', provider: 'WUZAPI', priority: 5 })
     expect(prismaMock.instanceNumber.create).toHaveBeenCalledWith({
-      data: { instanceId: 'i-1', provider: 'WAHA', label: undefined, priority: 5 },
+      data: { instanceId: 'i-1', provider: 'WUZAPI', label: undefined, priority: 5 },
     })
   })
 })
@@ -208,7 +208,7 @@ describe('addNumber', () => {
     prismaMock.instance.findFirst.mockResolvedValueOnce(null)
     const err = await addNumber({
       instanceId: 'i-x',
-      provider: 'WAHA',
+      provider: 'WUZAPI',
       apiClientId: 'tenant-B',
     }).catch((e) => e)
     expect(err).toBeInstanceOf(InstanceError)

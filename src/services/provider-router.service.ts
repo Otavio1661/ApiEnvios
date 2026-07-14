@@ -29,7 +29,7 @@ export interface DispatchResult {
 // ── Verifica se um provider está configurado/habilitado ───────
 function providerEnabled(providerName: Provider): boolean {
   if (providerName === 'EVOLUTION') return config.providers.evolution.enabled
-  if (providerName === 'WAHA') return config.providers.waha.enabled
+  if (providerName === 'WUZAPI') return config.providers.wuzapi.enabled
   return config.providers.cloudApi.enabled
 }
 
@@ -96,7 +96,21 @@ async function dispatchToNumber(
 
   let result: ProviderSendResult
   try {
-    if (payload.type === 'TEXT') {
+    if (payload.type === 'BUTTONS') {
+      // Botões só existem em providers que implementam sendButtons (WuzAPI).
+      // Sem isso, falha explícita — nunca cai silenciosamente pra texto.
+      if (!provider.sendButtons) {
+        result = { success: false, error: `Provider ${number.provider} não suporta botões interativos (use uma instância WuzAPI).`, errorCode: 'BUTTONS_UNSUPPORTED' }
+      } else {
+        result = await provider.sendButtons(
+          providerInstanceId,
+          payload.to,
+          payload.text ?? '',
+          payload.buttons ?? [],
+          payload.footer,
+        )
+      }
+    } else if (payload.type === 'TEXT') {
       result = await provider.sendText(providerInstanceId, payload.to, payload.text ?? '')
     } else {
       result = await provider.sendMedia(
@@ -219,8 +233,9 @@ export async function sendWithFallback(
     logger.warn(`[Router] Instância ${instance.id} (${instance.provider}) falhou: ${result.error} — próxima...`)
   }
 
-  // Último recurso: Cloud API oficial (sempre permitida quando configurada)
-  if (providerEnabled('CLOUD_API')) {
+  // Último recurso: Cloud API oficial (sempre permitida quando configurada).
+  // Botões não caem aqui — só WuzAPI suporta; devolve o erro da cadeia.
+  if (providerEnabled('CLOUD_API') && payload.type !== 'BUTTONS') {
     const provider = providers.CLOUD_API
     try {
       const result =
