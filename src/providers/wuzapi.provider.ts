@@ -15,7 +15,7 @@ import axios, { AxiosInstance } from 'axios'
 import { randomBytes } from 'crypto'
 import { config } from '../config'
 import { logger } from '../utils/logger'
-import type { IWhatsappProvider, ProviderSendResult, InstanceStatus, MessageType, Provider, WhatsappButton } from '../types'
+import type { IWhatsappProvider, ProviderSendResult, InstanceStatus, MessageType, Provider, WhatsappButton, ChatPresenceState, CheckNumberResult } from '../types'
 
 interface WuzUser {
   id: string | number
@@ -101,6 +101,7 @@ export class WuzapiProvider implements IWhatsappProvider {
       VIDEO:    { endpoint: '/chat/send/video',    field: 'Video' },
       AUDIO:    { endpoint: '/chat/send/audio',    field: 'Audio' },
       DOCUMENT: { endpoint: '/chat/send/document', field: 'Document' },
+      STICKER:  { endpoint: '/chat/send/sticker',  field: 'Sticker' },
     }
     const cfg = map[type] ?? map.IMAGE
 
@@ -155,6 +156,103 @@ export class WuzapiProvider implements IWhatsappProvider {
     } catch (err: any) {
       return this.handleError(err, Date.now() - start)
     }
+  }
+
+  /**
+   * Pin de localização no mapa. Endpoint /chat/send/location.
+   * Campos confirmados no source do handler (locationStruct): Phone, Latitude,
+   * Longitude, Name (rótulo opcional exibido abaixo do pin).
+   */
+  async sendLocation(instanceId: string, to: string, latitude: number, longitude: number, name?: string): Promise<ProviderSendResult> {
+    const start = Date.now()
+    try {
+      const body: Record<string, unknown> = { Phone: to, Latitude: latitude, Longitude: longitude }
+      if (name) body.Name = name
+      const response = await this.userClient(instanceId).post('/chat/send/location', body)
+      return { success: true, providerId: response.data?.data?.Id, duration: Date.now() - start }
+    } catch (err: any) {
+      return this.handleError(err, Date.now() - start)
+    }
+  }
+
+  /**
+   * Cartão de contato (vCard). Endpoint /chat/send/contact.
+   * Campos confirmados no source (contactStruct): Phone, Name, Vcard (string
+   * VCARD 3.0 completa — o WuzAPI não monta o vCard sozinho, recebe pronto).
+   */
+  async sendContact(instanceId: string, to: string, name: string, phone: string): Promise<ProviderSendResult> {
+    const start = Date.now()
+    const digits = phone.replace(/\D/g, '')
+    const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${name}\nTEL;type=CELL;type=VOICE;waid=${digits}:+${digits}\nEND:VCARD`
+    try {
+      const response = await this.userClient(instanceId).post('/chat/send/contact', { Phone: to, Name: name, Vcard: vcard })
+      return { success: true, providerId: response.data?.data?.Id, duration: Date.now() - start }
+    } catch (err: any) {
+      return this.handleError(err, Date.now() - start)
+    }
+  }
+
+  /**
+   * Enquete com opções de resposta. Endpoint /chat/send/poll.
+   * Campos confirmados no source (pollRequest, tags JSON minúsculas): group
+   * (destinatário — mesmo formato de Phone dos outros envios, nome genérico
+   * porque também aceita JID de grupo), header (pergunta), options (2-12 itens).
+   */
+  async sendPoll(instanceId: string, to: string, question: string, options: string[]): Promise<ProviderSendResult> {
+    const start = Date.now()
+    try {
+      const response = await this.userClient(instanceId).post('/chat/send/poll', { group: to, header: question, options })
+      return { success: true, providerId: response.data?.data?.Id, duration: Date.now() - start }
+    } catch (err: any) {
+      return this.handleError(err, Date.now() - start)
+    }
+  }
+
+  /**
+   * Reage com emoji a uma mensagem já trocada na conversa. Endpoint /chat/react.
+   * Campos confirmados no source (textStruct do handler React): Phone, Body
+   * (emoji; string vazia = remove a reação), Id (id da mensagem-alvo).
+   */
+  async sendReaction(instanceId: string, to: string, targetMessageId: string, emoji: string): Promise<ProviderSendResult> {
+    const start = Date.now()
+    try {
+      const response = await this.userClient(instanceId).post('/chat/react', { Phone: to, Body: emoji, Id: targetMessageId })
+      return { success: true, providerId: response.data?.data?.Id, duration: Date.now() - start }
+    } catch (err: any) {
+      return this.handleError(err, Date.now() - start)
+    }
+  }
+
+  /**
+   * Indicador de "digitando…"/"gravando áudio…" na conversa. Endpoint /chat/presence.
+   * Campos confirmados no source (chatPresenceStruct): Phone, State ("composing"/
+   * "paused"), Media (opcional — "audio" indica "gravando áudio" em vez de "digitando").
+   */
+  async setPresence(instanceId: string, to: string, state: ChatPresenceState): Promise<void> {
+    const body: Record<string, unknown> = { Phone: to, State: state === 'paused' ? 'paused' : 'composing' }
+    if (state === 'recording') body.Media = 'audio'
+    await this.userClient(instanceId).post('/chat/presence', body)
+  }
+
+  /**
+   * Marca mensagens recebidas como lidas (double-check azul). Endpoint /chat/markread.
+   * Campos confirmados no source (markReadStruct, campos novos priorizados sobre
+   * os legados Chat/Sender): Id (array de ids), ChatPhone, SenderPhone (opcional,
+   * só relevante em grupos — quem enviou a mensagem).
+   */
+  async markRead(instanceId: string, chatPhone: string, messageIds: string[]): Promise<void> {
+    await this.userClient(instanceId).post('/chat/markread', { Id: messageIds, ChatPhone: chatPhone })
+  }
+
+  /**
+   * Verifica se números têm WhatsApp ativo. Endpoint /user/check.
+   * Campos confirmados no source (checkUserStruct/UserCollection): request
+   * {Phone: string[]}, resposta {Users: [{Query, IsInWhatsapp, JID, VerifiedName}]}.
+   */
+  async checkNumber(instanceId: string, phones: string[]): Promise<CheckNumberResult[]> {
+    const response = await this.userClient(instanceId).post('/user/check', { Phone: phones })
+    const users: Array<{ Query: string; IsInWhatsapp: boolean; JID: string }> = response.data?.data?.Users ?? response.data?.Users ?? []
+    return users.map(u => ({ phone: u.Query, existsOnWhatsapp: u.IsInWhatsapp, jid: u.JID || undefined }))
   }
 
   // ── Sessão / provisionamento ─────────────────────────────────
@@ -257,6 +355,7 @@ export class WuzapiProvider implements IWhatsappProvider {
       VIDEO: 'video/mp4',
       AUDIO: 'audio/ogg',
       DOCUMENT: 'application/pdf',
+      STICKER: 'image/webp',
     }
     return map[type] ?? 'application/octet-stream'
   }

@@ -13,7 +13,7 @@ const prismaMock = vi.hoisted(() => ({
   apiClient: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
   instance: { findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   user: { findUnique: vi.fn(), create: vi.fn() },
-  message: { findFirst: vi.fn(), update: vi.fn() },
+  message: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
   webhook: { findMany: vi.fn() },
   $transaction: vi.fn(),
 }))
@@ -291,6 +291,107 @@ describe('Provisionamento admin-only', () => {
     const body = res.json()
     expect(body.id).toBe('novo-1')
     expect(body.apiKey).toBe('gen-key')
+    await app.close()
+  })
+})
+
+describe('Envio por token de instância — tipos novos e ações WuzAPI', () => {
+  const wuzInstance = {
+    id: 'inst-1', apiClientId: 'tenant-A', provider: 'WUZAPI', token: 'tok-1', instanceId: 'wuz-tok',
+    apiClient: { id: 'tenant-A', active: true },
+    status: 'ACTIVE', maxRetries: 3,
+  }
+  const evoInstance = {
+    id: 'inst-2', apiClientId: 'tenant-A', provider: 'EVOLUTION', token: 'tok-2', instanceId: 'evo-1',
+    apiClient: { id: 'tenant-A', active: true },
+    status: 'ACTIVE', maxRetries: 3,
+  }
+
+  it('POST /instance/:id/messages/send (LOCATION) cria a Message e enfileira', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue(wuzInstance)
+    prismaMock.message.create.mockResolvedValue({ id: 'msg-loc', maxRetries: 3 })
+
+    app = await makeApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/instance/inst-1/messages/send',
+      headers: { Token: 'tok-1' },
+      payload: { to: '5544999990000', type: 'LOCATION', latitude: -23.5, longitude: -46.6, locationName: 'Escritório' },
+    })
+
+    expect(res.statusCode).toBe(202)
+    expect(prismaMock.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: 'LOCATION',
+          location: { latitude: -23.5, longitude: -46.6 },
+          content: 'Escritório',
+        }),
+      }),
+    )
+    await app.close()
+  })
+
+  it('POST /instance/:id/messages/send (POLL) valida schema — falta pollOptions → 400', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue(wuzInstance)
+
+    app = await makeApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/instance/inst-1/messages/send',
+      headers: { Token: 'tok-1' },
+      payload: { to: '5544999990000', type: 'POLL', text: 'Pergunta?' },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(prismaMock.message.create).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('POST /instance/:id/actions/check-number numa instância EVOLUTION → 400 CHECK_NUMBER_UNSUPPORTED', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue(evoInstance)
+
+    app = await makeApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/instance/inst-2/actions/check-number',
+      headers: { Token: 'tok-2' },
+      payload: { phones: ['5544999990000'] },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().errorCode).toBe('CHECK_NUMBER_UNSUPPORTED')
+    await app.close()
+  })
+
+  it('POST /instance/:id/actions/react numa instância EVOLUTION → 400 REACTION_UNSUPPORTED', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue(evoInstance)
+
+    app = await makeApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/instance/inst-2/actions/react',
+      headers: { Token: 'tok-2' },
+      payload: { to: '5544999990000', messageId: 'abc', emoji: '👍' },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().errorCode).toBe('REACTION_UNSUPPORTED')
+    await app.close()
+  })
+
+  it('POST /instance/:id/actions/presence com payload inválido (state fora do enum) → 400', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue(wuzInstance)
+
+    app = await makeApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/instance/inst-1/actions/presence',
+      headers: { Token: 'tok-1' },
+      payload: { to: '5544999990000', state: 'dancando' },
+    })
+
+    expect(res.statusCode).toBe(400)
     await app.close()
   })
 })

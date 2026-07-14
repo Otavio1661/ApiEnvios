@@ -41,21 +41,34 @@ async function processJob(job: Job<SendJobData>) {
     data: { status: 'SENDING', retryCount: attemptNumber - 1 },
   })
 
-  // BUTTONS: content = corpo do texto, e a estrutura {footer, buttons} vem do
-  // campo Json `buttons`. Demais tipos: TEXT usa content como texto; mídia usa
-  // content como URL.
+  // BUTTONS/LOCATION/CONTACT/POLL guardam campos extras em colunas Json próprias
+  // (buttons/location/contact/poll); os demais tipos usam `content` como texto ou
+  // URL de mídia. Ver src/utils/message-payload.ts para a mesma lógica no sentido
+  // inverso (montagem do create a partir do payload recebido na API).
   const isButtons = message.type === 'BUTTONS'
+  const isLocation = message.type === 'LOCATION'
+  const isContact = message.type === 'CONTACT'
+  const isPoll = message.type === 'POLL'
   const isText = message.type === 'TEXT'
   const buttonsData = (message.buttons ?? {}) as { footer?: string; buttons?: WhatsappButton[] }
+  const locationData = (message.location ?? {}) as { latitude?: number; longitude?: number }
+  const contactData = (message.contact ?? {}) as { phone?: string }
+  const pollData = (message.poll ?? {}) as { options?: string[] }
 
   const payload: SendMessagePayload = {
     to: message.toPhone,
     type: message.type,
-    text: isText || isButtons ? message.content : undefined,
-    mediaUrl: isText || isButtons ? undefined : message.content,
+    text: isText || isButtons || isPoll ? message.content : undefined,
+    mediaUrl: isText || isButtons || isLocation || isContact || isPoll ? undefined : message.content,
     caption: message.caption ?? undefined,
     buttons: isButtons ? buttonsData.buttons : undefined,
     footer: isButtons ? buttonsData.footer : undefined,
+    latitude: isLocation ? locationData.latitude : undefined,
+    longitude: isLocation ? locationData.longitude : undefined,
+    locationName: isLocation ? (message.content || undefined) : undefined,
+    contactName: isContact ? message.content : undefined,
+    contactPhone: isContact ? contactData.phone : undefined,
+    pollOptions: isPoll ? pollData.options : undefined,
   }
 
   const start = Date.now()

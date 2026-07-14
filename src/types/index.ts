@@ -51,7 +51,9 @@ export type MessageStatus =
   | 'SCHEDULED'
   | 'CANCELLED'
 
-export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'BUTTONS'
+export type MessageType =
+  | 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'BUTTONS'
+  | 'LOCATION' | 'CONTACT' | 'POLL'
 
 export type NumberStatus = 'ACTIVE' | 'WARMING' | 'BANNED' | 'SUSPENDED' | 'RETIRED'
 
@@ -66,12 +68,28 @@ export interface SendMessagePayload {
   to: string              // número destino com DDI: "5544999990000"
   type: MessageType
   text?: string           // para tipo TEXT (ou corpo do BUTTONS)
-  mediaUrl?: string       // para IMAGE, VIDEO, AUDIO, DOCUMENT
+  mediaUrl?: string       // para IMAGE, VIDEO, AUDIO, DOCUMENT, STICKER
   caption?: string        // legenda para mídia
   buttons?: WhatsappButton[]  // para type=BUTTONS
   footer?: string             // rodapé opcional do BUTTONS
+  latitude?: number           // para type=LOCATION
+  longitude?: number          // para type=LOCATION
+  locationName?: string       // rótulo opcional do local (type=LOCATION)
+  contactName?: string        // para type=CONTACT
+  contactPhone?: string       // para type=CONTACT
+  pollOptions?: string[]      // para type=POLL (a pergunta vai em `text`)
   externalId?: string     // ID do sistema cliente para idempotência
   scheduledAt?: string    // ISO 8601 para agendamento
+}
+
+// ── Estado de "digitando"/"gravando" (ação, não mensagem) ─────
+export type ChatPresenceState = 'typing' | 'recording' | 'paused'
+
+// ── Resultado de checagem de número no WhatsApp ────────────────
+export interface CheckNumberResult {
+  phone: string
+  existsOnWhatsapp: boolean
+  jid?: string
 }
 
 // ── Resultado de envio de um provider ────────────────────────
@@ -91,6 +109,20 @@ export interface IWhatsappProvider {
   sendMedia(instanceId: string, to: string, mediaUrl: string, caption?: string, type?: MessageType): Promise<ProviderSendResult>
   /** Mensagem interativa com botões. Opcional — só providers que suportam (WuzAPI) implementam. */
   sendButtons?(instanceId: string, to: string, body: string, buttons: WhatsappButton[], footer?: string): Promise<ProviderSendResult>
+  /** Localização (pin no mapa). Opcional — só WuzAPI implementa. */
+  sendLocation?(instanceId: string, to: string, latitude: number, longitude: number, name?: string): Promise<ProviderSendResult>
+  /** Cartão de contato (vCard). Opcional — só WuzAPI implementa. */
+  sendContact?(instanceId: string, to: string, name: string, phone: string): Promise<ProviderSendResult>
+  /** Enquete com opções de resposta. Opcional — só WuzAPI implementa. */
+  sendPoll?(instanceId: string, to: string, question: string, options: string[]): Promise<ProviderSendResult>
+  /** Reage (emoji) a uma mensagem já trocada na conversa. targetId vazio = remove a reação. Opcional — só WuzAPI. */
+  sendReaction?(instanceId: string, to: string, targetMessageId: string, emoji: string): Promise<ProviderSendResult>
+  /** Indicador de "digitando…"/"gravando áudio…". Ação, não gera Message. Opcional — só WuzAPI. */
+  setPresence?(instanceId: string, to: string, state: ChatPresenceState): Promise<void>
+  /** Marca mensagens recebidas como lidas (double-check azul). Opcional — só WuzAPI. */
+  markRead?(instanceId: string, chatPhone: string, messageIds: string[]): Promise<void>
+  /** Verifica se números têm WhatsApp ativo. Opcional — só WuzAPI. */
+  checkNumber?(instanceId: string, phones: string[]): Promise<CheckNumberResult[]>
   getInstanceStatus(instanceId: string): Promise<InstanceStatus>
   createInstance(instanceId: string): Promise<{ instanceId: string; qrCode?: string }>
   /** Conecta/reconecta uma instância JÁ criada e retorna o QR atual. */

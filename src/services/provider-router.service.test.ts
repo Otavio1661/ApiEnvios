@@ -22,10 +22,14 @@ vi.mock('../utils/prisma', () => ({ prisma: prismaMock }))
 
 // providers: cada provider com sendText/sendMedia mockados + isBanError real-ish.
 // isBanError simples: considera "banned"/"403"/"blocked" como ban (como o real).
-const { evolutionSend, wuzapiSend, cloudSend, notifyBan, isBanError } = vi.hoisted(() => ({
+const { evolutionSend, wuzapiSend, cloudSend, wuzapiButtons, wuzapiLocation, wuzapiContact, wuzapiPoll, notifyBan, isBanError } = vi.hoisted(() => ({
   evolutionSend: vi.fn(),
   wuzapiSend: vi.fn(),
   cloudSend: vi.fn(),
+  wuzapiButtons: vi.fn(),
+  wuzapiLocation: vi.fn(),
+  wuzapiContact: vi.fn(),
+  wuzapiPoll: vi.fn(),
   notifyBan: vi.fn(async () => {}),
   isBanError: (msg: string) => /banned|403|blocked/i.test(msg),
 }))
@@ -33,7 +37,12 @@ const { evolutionSend, wuzapiSend, cloudSend, notifyBan, isBanError } = vi.hoist
 vi.mock('../providers', () => ({
   providers: {
     EVOLUTION: { name: 'EVOLUTION', sendText: evolutionSend, sendMedia: evolutionSend, isBanError },
-    WUZAPI: { name: 'WUZAPI', sendText: wuzapiSend, sendMedia: wuzapiSend, isBanError },
+    // Só a WUZAPI implementa os métodos opcionais (botões/localização/contato/enquete)
+    // — mesma exclusividade dos providers reais.
+    WUZAPI: {
+      name: 'WUZAPI', sendText: wuzapiSend, sendMedia: wuzapiSend, isBanError,
+      sendButtons: wuzapiButtons, sendLocation: wuzapiLocation, sendContact: wuzapiContact, sendPoll: wuzapiPoll,
+    },
     CLOUD_API: { name: 'CLOUD_API', sendText: cloudSend, sendMedia: cloudSend },
   },
 }))
@@ -51,18 +60,18 @@ vi.mock('../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
 
-// Config: habilita EVOLUTION e WuzAPI; CLOUD_API desabilitada por padrão
-// (cada teste pode sobrescrever via spy se precisar).
-vi.mock('../config', () => ({
-  config: {
-    providers: {
-      evolution: { enabled: true },
-      wuzapi: { enabled: true },
-      cloudApi: { enabled: false },
-    },
-    sending: { delayMin: 0, delayMax: 0, maxMessagesPerNumberDay: 200 },
+// Config: habilita EVOLUTION e WuzAPI; CLOUD_API desabilitada por padrão.
+// Objeto hoisted e MUTÁVEL — testes que precisam da Cloud API habilitada (ex.: o
+// guard "não degradar tipos exclusivos do WuzAPI pra texto") ajustam e restauram.
+const configMock = vi.hoisted(() => ({
+  providers: {
+    evolution: { enabled: true },
+    wuzapi: { enabled: true },
+    cloudApi: { enabled: false },
   },
+  sending: { delayMin: 0, delayMax: 0, maxMessagesPerNumberDay: 200 },
 }))
+vi.mock('../config', () => ({ config: configMock }))
 
 import { sendWithFallback, sendViaInstance, selectPoolNumber } from './provider-router.service'
 
@@ -253,6 +262,52 @@ describe('sendViaInstance (envio dedicado, via pool de números)', () => {
   })
 })
 
+describe('sendViaInstance — tipos exclusivos do WuzAPI (BUTTONS/LOCATION/CONTACT/POLL)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('BUTTONS numa instância EVOLUTION falha explícito (BUTTONS_UNSUPPORTED), sem degradar pra texto', async () => {
+    prismaMock.instanceNumber.findMany.mockResolvedValueOnce([makeNumber({ id: 'num-A', provider: 'EVOLUTION' })])
+
+    const res = await sendViaInstance(makeInstance({ provider: 'EVOLUTION' }), { to: '5544999990000', type: 'BUTTONS', text: 'oi', buttons: [{ type: 'quickreply', displayText: 'Sim' }] })
+
+    expect(res.success).toBe(false)
+    expect(res.error).toMatch(/não suporta botões/i)
+    expect(evolutionSend).not.toHaveBeenCalled()
+  })
+
+  it('LOCATION numa instância WUZAPI chama sendLocation e sucede', async () => {
+    prismaMock.instanceNumber.findMany.mockResolvedValueOnce([makeNumber({ id: 'num-A', provider: 'WUZAPI', providerInstanceId: 'wuz-1' })])
+    prismaMock.instanceNumber.update.mockResolvedValue({})
+    wuzapiLocation.mockResolvedValueOnce({ success: true, providerId: 'PID-LOC' })
+
+    const res = await sendViaInstance(makeInstance({ provider: 'WUZAPI' }), { to: '5544999990000', type: 'LOCATION', latitude: -23.5, longitude: -46.6, locationName: 'Escritório' })
+
+    expect(wuzapiLocation).toHaveBeenCalledWith('wuz-1', '5544999990000', -23.5, -46.6, 'Escritório')
+    expect(res.success).toBe(true)
+    expect(res.providerId).toBe('PID-LOC')
+  })
+
+  it('CONTACT numa instância EVOLUTION falha explícito (CONTACT_UNSUPPORTED)', async () => {
+    prismaMock.instanceNumber.findMany.mockResolvedValueOnce([makeNumber({ id: 'num-A', provider: 'EVOLUTION' })])
+
+    const res = await sendViaInstance(makeInstance({ provider: 'EVOLUTION' }), { to: '5544999990000', type: 'CONTACT', contactName: 'Fulano', contactPhone: '5544988880000' })
+
+    expect(res.success).toBe(false)
+    expect(res.error).toMatch(/não suporta cartão de contato/i)
+  })
+
+  it('POLL numa instância WUZAPI chama sendPoll com a pergunta e as opções', async () => {
+    prismaMock.instanceNumber.findMany.mockResolvedValueOnce([makeNumber({ id: 'num-A', provider: 'WUZAPI', providerInstanceId: 'wuz-1' })])
+    prismaMock.instanceNumber.update.mockResolvedValue({})
+    wuzapiPoll.mockResolvedValueOnce({ success: true, providerId: 'PID-POLL' })
+
+    const res = await sendViaInstance(makeInstance({ provider: 'WUZAPI' }), { to: '5544999990000', type: 'POLL', text: 'Qual sua cor favorita?', pollOptions: ['Azul', 'Verde'] })
+
+    expect(wuzapiPoll).toHaveBeenCalledWith('wuz-1', '5544999990000', 'Qual sua cor favorita?', ['Azul', 'Verde'])
+    expect(res.success).toBe(true)
+  })
+})
+
 describe('sendWithFallback (fallback opt-in por tenant)', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -320,5 +375,37 @@ describe('sendWithFallback (fallback opt-in por tenant)', () => {
 
     expect(evolutionSend).not.toHaveBeenCalled()
     expect(res.success).toBe(false)
+  })
+
+  it('POLL não cai pro Cloud API como último recurso, mesmo com ela habilitada (não degrada pra texto)', async () => {
+    configMock.providers.cloudApi.enabled = true
+    try {
+      prismaMock.apiClient.findUnique.mockResolvedValueOnce({ id: 'tenant-1', fallbackEnabled: false })
+      prismaMock.instance.findMany.mockResolvedValueOnce([])
+
+      const res = await sendWithFallback('tenant-1', { to: '5544999990000', type: 'POLL', text: 'Pergunta?', pollOptions: ['A', 'B'] })
+
+      expect(cloudSend).not.toHaveBeenCalled()
+      expect(res.success).toBe(false)
+    } finally {
+      configMock.providers.cloudApi.enabled = false
+    }
+  })
+
+  it('TEXT cai pro Cloud API como último recurso quando ela está habilitada (comportamento normal)', async () => {
+    configMock.providers.cloudApi.enabled = true
+    try {
+      prismaMock.apiClient.findUnique.mockResolvedValueOnce({ id: 'tenant-1', fallbackEnabled: false })
+      prismaMock.instance.findMany.mockResolvedValueOnce([])
+      cloudSend.mockResolvedValueOnce({ success: true, providerId: 'PID-CLOUD' })
+
+      const res = await sendWithFallback('tenant-1', payload)
+
+      expect(cloudSend).toHaveBeenCalledTimes(1)
+      expect(res.success).toBe(true)
+      expect(res.provider).toBe('CLOUD_API')
+    } finally {
+      configMock.providers.cloudApi.enabled = false
+    }
   })
 })

@@ -1,39 +1,12 @@
 // src/routes/messages.route.ts
 import type { FastifyInstance } from 'fastify'
-import { z } from 'zod'
 import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { enqueueSend, requeueSend, removeSendJob } from '../queues/send-message.queue'
 import { normalizePhone } from '../utils/helpers'
 import { checkRecipientHourlyLimit } from '../utils/recipient-rate-limit'
-
-// Botão interativo (type=BUTTONS). Discriminado por `type`: quickreply | url | call.
-const buttonSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('quickreply'), displayText: z.string().min(1).max(25) }),
-  z.object({ type: z.literal('url'), displayText: z.string().min(1).max(25), url: z.string().url() }),
-  z.object({ type: z.literal('call'), displayText: z.string().min(1).max(25), phoneNumber: z.string().min(8).max(20) }),
-])
-
-const sendSchema = z.object({
-  to: z.string().min(10).max(15),
-  type: z.enum(['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'BUTTONS']).default('TEXT'),
-  text: z.string().optional(),
-  mediaUrl: z.string().url().optional(),
-  caption: z.string().optional(),
-  buttons: z.array(buttonSchema).min(1).max(5).optional(),
-  footer: z.string().max(60).optional(),
-  externalId: z.string().optional(),
-  instanceId: z.string().optional(),
-  scheduledAt: z.string().datetime().optional(),
-}).refine(
-  // BUTTONS exige corpo (text) + pelo menos 1 botão; no máx 3 quick-reply (limite do WhatsApp).
-  (d) => {
-    if (d.type !== 'BUTTONS') return true
-    if (!d.text || !d.buttons?.length) return false
-    return d.buttons.filter(b => b.type === 'quickreply').length <= 3
-  },
-  { message: 'type=BUTTONS exige "text" (corpo) e 1-3 botões quickreply (+ opcionalmente 1 url e 1 call).' }
-)
+import { sendBodySchema as sendSchema } from '../schemas/message.schema'
+import { buildMessageCreateFields } from '../utils/message-payload'
 
 export async function messagesRoutes(app: FastifyInstance) {
   // ── POST /messages — Enviar mensagem ─────────────────────────
@@ -105,13 +78,7 @@ export async function messagesRoutes(app: FastifyInstance) {
             externalId: payload.externalId,
             instanceId: payload.instanceId,
             toPhone: to,
-            type: payload.type,
-            content: payload.text ?? payload.mediaUrl ?? '',
-            caption: payload.caption,
-            // BUTTONS: guarda footer + array de botões no campo Json.
-            buttons: payload.type === 'BUTTONS'
-              ? { footer: payload.footer, buttons: payload.buttons }
-              : undefined,
+            ...buildMessageCreateFields(payload),
             scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : undefined,
             status: isScheduled ? 'SCHEDULED' : 'QUEUED',
             createdByUserId: request.authUser?.id, // null se for envio por API key/token

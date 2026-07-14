@@ -110,6 +110,25 @@ async function dispatchToNumber(
           payload.footer,
         )
       }
+    } else if (payload.type === 'LOCATION') {
+      // Mesma lógica de falha explícita das outras mensagens exclusivas do WuzAPI.
+      if (!provider.sendLocation) {
+        result = { success: false, error: `Provider ${number.provider} não suporta localização (use uma instância WuzAPI).`, errorCode: 'LOCATION_UNSUPPORTED' }
+      } else {
+        result = await provider.sendLocation(providerInstanceId, payload.to, payload.latitude ?? 0, payload.longitude ?? 0, payload.locationName)
+      }
+    } else if (payload.type === 'CONTACT') {
+      if (!provider.sendContact) {
+        result = { success: false, error: `Provider ${number.provider} não suporta cartão de contato (use uma instância WuzAPI).`, errorCode: 'CONTACT_UNSUPPORTED' }
+      } else {
+        result = await provider.sendContact(providerInstanceId, payload.to, payload.contactName ?? '', payload.contactPhone ?? '')
+      }
+    } else if (payload.type === 'POLL') {
+      if (!provider.sendPoll) {
+        result = { success: false, error: `Provider ${number.provider} não suporta enquete (use uma instância WuzAPI).`, errorCode: 'POLL_UNSUPPORTED' }
+      } else {
+        result = await provider.sendPoll(providerInstanceId, payload.to, payload.text ?? '', payload.pollOptions ?? [])
+      }
     } else if (payload.type === 'TEXT') {
       result = await provider.sendText(providerInstanceId, payload.to, payload.text ?? '')
     } else {
@@ -234,8 +253,10 @@ export async function sendWithFallback(
   }
 
   // Último recurso: Cloud API oficial (sempre permitida quando configurada).
-  // Botões não caem aqui — só WuzAPI suporta; devolve o erro da cadeia.
-  if (providerEnabled('CLOUD_API') && payload.type !== 'BUTTONS') {
+  // Tipos exclusivos do WuzAPI não caem aqui — devolve o erro da cadeia em vez de
+  // degradar silenciosamente (ex.: mandar só o texto de uma localização/enquete).
+  const WUZAPI_ONLY_TYPES: string[] = ['BUTTONS', 'LOCATION', 'CONTACT', 'POLL']
+  if (providerEnabled('CLOUD_API') && !WUZAPI_ONLY_TYPES.includes(payload.type)) {
     const provider = providers.CLOUD_API
     try {
       const result =

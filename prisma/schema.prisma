@@ -133,10 +133,16 @@ model Message {
 
   // Conteúdo
   type            MessageType   @default(TEXT)
-  content         String                 // texto, URL da mídia, ou corpo do botão
+  content         String                 // texto, URL da mídia/figurinha, nome do local/contato, ou pergunta da enquete
   caption         String?                // legenda para mídias
   // Interativo (type=BUTTONS): { footer?, buttons: [{displayText, type, url?, phoneNumber?}] }
   buttons         Json?
+  // Localização (type=LOCATION): { latitude, longitude }. `content` guarda o nome do local.
+  location        Json?
+  // Contato/vCard (type=CONTACT): { phone }. `content` guarda o nome do contato.
+  contact         Json?
+  // Enquete (type=POLL): { options: string[] }. `content` guarda a pergunta.
+  poll            Json?
 
   // Roteamento
   providerId      String?                // ID no provider (ex: message id do Evolution)
@@ -397,6 +403,9 @@ enum MessageType {
   DOCUMENT
   STICKER
   BUTTONS     // mensagem interativa com botões (só via WuzAPI)
+  LOCATION    // pin de localização (só via WuzAPI)
+  CONTACT     // cartão de contato / vCard (só via WuzAPI)
+  POLL        // enquete com opções de resposta (só via WuzAPI)
 }
 
 enum RotationReason {

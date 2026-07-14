@@ -103,7 +103,147 @@ echo $response; // {"id":"...","status":"QUEUED"}</code></pre>
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","type":"IMAGE","mediaUrl":"https://exemplo.com/foto.jpg","caption":"Legenda"}'</code></pre>
   </div>
-  <p class="muted" style="margin-top:8px">Tipos aceitos: <code>IMAGE</code>, <code>VIDEO</code>, <code>AUDIO</code>, <code>DOCUMENT</code>.</p>
+  <p class="muted" style="margin-top:8px">Tipos aceitos: <code>IMAGE</code>, <code>VIDEO</code>, <code>AUDIO</code>, <code>DOCUMENT</code>, <code>STICKER</code>.</p>
+</div>
+
+<!-- ════ Funções exclusivas do WuzAPI ════ -->
+<hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
+<h2>Funções exclusivas do WuzAPI</h2>
+<p class="muted">O provider <strong>WuzAPI</strong> fala direto com o WhatsApp (biblioteca whatsmeow) e por isso expõe recursos que Evolution e Cloud API não têm: botões, localização, contato, enquete e ações de conversa (digitando, reagir, confirmar leitura, verificar número).</p>
+
+<div class="callout">
+  <span class="callout-icon">🔘</span>
+  <div>
+    <strong>Crie uma instância com provider WuzAPI</strong> no painel pra usar qualquer coisa desta seção. Envios (botões/localização/contato/enquete/figurinha) usam o endpoint completo <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send</code> — se a instância não for WuzAPI, a resposta falha explicitamente com um <code>errorCode</code> específico (ex.: <code>BUTTONS_UNSUPPORTED</code>), nunca degrada silenciosamente pra texto. Ações (digitando/reagir/ler/verificar) são chamadas imediatas em <code>/v1/instance/<%= it.sample.id %>/actions/*</code>, sem passar pela fila.
+  </div>
+</div>
+
+<!-- Botões interativos -->
+<div class="card">
+  <h3>Botões interativos</h3>
+  <p class="muted"><code>type: "BUTTONS"</code> — o WhatsApp exibe botões de resposta rápida, link ou ligação abaixo da mensagem.</p>
+
+  <table class="instances-table" style="margin:12px 0">
+    <thead><tr><th>Tipo de botão</th><th>Campos</th><th>Limite</th></tr></thead>
+    <tbody>
+      <tr><td><code>quickreply</code></td><td><code>displayText</code></td><td>Até 3 por mensagem · texto até 25 caracteres</td></tr>
+      <tr><td><code>url</code></td><td><code>displayText</code>, <code>url</code></td><td>No máximo 1 por mensagem · abre o link</td></tr>
+      <tr><td><code>call</code></td><td><code>displayText</code>, <code>phoneNumber</code></td><td>No máximo 1 por mensagem · liga para o número</td></tr>
+    </tbody>
+  </table>
+
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+  -H "Token: <%= it.sample.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "5544999990000",
+    "type": "BUTTONS",
+    "text": "Seu pedido está pronto! O que deseja fazer?",
+    "footer": "Responda uma das opções abaixo",
+    "buttons": [
+      { "type": "quickreply", "displayText": "Confirmar" },
+      { "type": "quickreply", "displayText": "Cancelar" },
+      { "type": "url", "displayText": "Ver detalhes", "url": "https://exemplo.com/pedido/123" }
+    ]
+  }'</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px"><code>text</code> obrigatório (corpo) · <code>footer</code> opcional (até 60 caracteres) · <code>buttons</code>: 1 a 5 itens, no máximo 3 <code>quickreply</code> + 1 <code>url</code> + 1 <code>call</code>.</p>
+</div>
+
+<!-- Localização -->
+<div class="card">
+  <h3>Localização</h3>
+  <p class="muted"><code>type: "LOCATION"</code> — envia um pin de mapa com coordenadas e rótulo opcional.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+  -H "Token: <%= it.sample.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","type":"LOCATION","latitude":-23.5505,"longitude":-46.6333,"locationName":"Nossa loja"}'</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px"><code>latitude</code> e <code>longitude</code> obrigatórios · <code>locationName</code> opcional (rótulo exibido abaixo do pin).</p>
+</div>
+
+<!-- Contato (vCard) -->
+<div class="card">
+  <h3>Contato (vCard)</h3>
+  <p class="muted"><code>type: "CONTACT"</code> — envia um cartão de contato que o destinatário pode salvar direto na agenda.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+  -H "Token: <%= it.sample.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","type":"CONTACT","contactName":"Suporte Loja X","contactPhone":"5544988880000"}'</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px"><code>contactName</code> e <code>contactPhone</code> obrigatórios — o vCard (VERSION 3.0) é montado automaticamente.</p>
+</div>
+
+<!-- Enquete -->
+<div class="card">
+  <h3>Enquete</h3>
+  <p class="muted"><code>type: "POLL"</code> — pergunta com opções de resposta, votação nativa do WhatsApp.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+  -H "Token: <%= it.sample.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","type":"POLL","text":"Qual sua cor favorita?","pollOptions":["Azul","Verde","Vermelho"]}'</code></pre>
+  </div>
+  <p class="muted" style="margin-top:8px"><code>text</code> é a pergunta · <code>pollOptions</code> aceita de 2 a 12 opções.</p>
+</div>
+
+<!-- Figurinha -->
+<div class="card">
+  <h3>Figurinha (sticker)</h3>
+  <p class="muted"><code>type: "STICKER"</code> — mesmo formato de "Enviar mídia" acima (<code>mediaUrl</code>), com o WuzAPI convertendo automaticamente para o formato de figurinha do WhatsApp.</p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media" \
+  -H "Token: <%= it.sample.token %>" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","type":"STICKER","mediaUrl":"https://exemplo.com/figurinha.webp"}'</code></pre>
+  </div>
+</div>
+
+<!-- Ações (não geram mensagem, chamada imediata) -->
+<div class="card">
+  <h3>Ações de conversa</h3>
+  <p class="muted">Diferente dos envios acima, ações NÃO entram na fila nem geram uma <code>Message</code> — são chamadas imediatas ao WhatsApp. Resposta <code>200 {ok:true}</code> em caso de sucesso.</p>
+
+  <p class="muted" style="margin-top:12px"><strong>Indicador "digitando…"/"gravando áudio…"</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/presence</code></p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/presence" \
+  -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","state":"typing"}'  # typing | recording | paused</code></pre>
+  </div>
+
+  <p class="muted" style="margin-top:16px"><strong>Reagir com emoji a uma mensagem</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/react</code></p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/react" \
+  -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","messageId":"ID_DA_MENSAGEM","emoji":"👍"}'  # emoji vazio/omitido remove a reação</code></pre>
+  </div>
+
+  <p class="muted" style="margin-top:16px"><strong>Marcar mensagens como lidas</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/read</code></p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/read" \
+  -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
+  -d '{"to":"5544999990000","messageIds":["ID_DA_MENSAGEM_1","ID_DA_MENSAGEM_2"]}'</code></pre>
+  </div>
+
+  <p class="muted" style="margin-top:16px"><strong>Verificar se números têm WhatsApp ativo</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/check-number</code></p>
+  <div class="code" x-data="{ copied:false }">
+    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/check-number" \
+  -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
+  -d '{"phones":["5544999990000","5544988880000"]}'
+# resposta: { "results": [{ "phone": "...", "existsOnWhatsapp": true, "jid": "..." }] }</code></pre>
+  </div>
 </div>
 
 <!-- Alternativa: API key da conta -->

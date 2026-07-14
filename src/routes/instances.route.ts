@@ -8,7 +8,10 @@ import { prisma } from '../utils/prisma'
 import { enqueueSend } from '../queues/send-message.queue'
 import { deleteInstanceCascade } from '../services/cascade-delete.service'
 import { normalizePhone } from '../utils/helpers'
-import type { MessageType } from '../types'
+import type { MessageType, ChatPresenceState } from '../types'
+import { providers } from '../providers'
+import { sendBodySchema } from '../schemas/message.schema'
+import { buildMessageCreateFields } from '../utils/message-payload'
 import {
   toInstanceResponse,
   listInstancesWithConnection,
@@ -76,6 +79,27 @@ const mediaSchema = z.object({
   mediaUrl: z.string().url(),
   caption: z.string().optional(),
   type: z.enum(['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT']).default('IMAGE'),
+})
+
+// ── Ações síncronas (exclusivas do WuzAPI) — não geram Message ─
+const presenceSchema = z.object({
+  to: z.string().min(10).max(15),
+  state: z.enum(['typing', 'recording', 'paused']),
+})
+
+const reactSchema = z.object({
+  to: z.string().min(10).max(15),
+  messageId: z.string().min(1),
+  emoji: z.string().max(8).optional(), // vazio/omitido = remove a reação
+})
+
+const readSchema = z.object({
+  to: z.string().min(10).max(15),
+  messageIds: z.array(z.string().min(1)).min(1).max(50),
+})
+
+const checkNumberSchema = z.object({
+  phones: z.array(z.string().min(8).max(20)).min(1).max(50),
 })
 
 export async function instancesRoutes(app: FastifyInstance) {
@@ -658,6 +682,135 @@ export async function instancesRoutes(app: FastifyInstance) {
       } catch (err: any) {
         request.log.error(`[Instances] Falha ao enfileirar mídia: ${err.message}`)
         return reply.status(500).send({ error: 'Falha ao processar a mensagem' })
+      }
+    },
+  })
+
+  // ── POST /instance/:id/messages/send — Envio unificado ────────
+  // Suporta TODOS os tipos (TEXT/mídia/STICKER/BUTTONS/LOCATION/CONTACT/POLL) —
+  // /messages/chat e /messages/media acima continuam funcionando (compat), mas só
+  // sabem TEXT e mídia básica. Este é o endpoint completo, espelhando POST /v1/messages.
+  app.post<{ Params: { id: string } }>('/instance/:id/messages/send', {
+    preHandler: authInstance,
+    handler: async (request, reply) => {
+      const body = sendBodySchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+
+      const instance = request.instance!
+      const payload = body.data
+      const to = normalizePhone(payload.to)
+
+      try {
+        const message = await prisma.message.create({
+          data: {
+            apiClientId: request.apiClient!.id,
+            instanceId: instance.id,
+            toPhone: to,
+            externalId: payload.externalId,
+            ...buildMessageCreateFields(payload),
+            status: 'QUEUED',
+          },
+        })
+
+        await enqueueSend(message.id, message.maxRetries)
+        return reply.status(202).send({ id: message.id, status: 'QUEUED' })
+      } catch (err: any) {
+        request.log.error(`[Instances] Falha ao enfileirar mensagem: ${err.message}`)
+        return reply.status(500).send({ error: 'Falha ao processar a mensagem' })
+      }
+    },
+  })
+
+  // ══════════════════════════════════════════════════════════════
+  // AÇÕES (exclusivas do WuzAPI) — chamadas síncronas ao provider,
+  // não passam pela fila nem geram registro em Message.
+  // ══════════════════════════════════════════════════════════════
+
+  // ── POST /instance/:id/actions/presence — Digitando/gravando ──
+  app.post<{ Params: { id: string } }>('/instance/:id/actions/presence', {
+    preHandler: authInstance,
+    handler: async (request, reply) => {
+      const body = presenceSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+      const instance = request.instance!
+      const provider = providers[instance.provider]
+      if (!provider.setPresence) {
+        return reply.status(400).send({ error: `Provider ${instance.provider} não suporta indicador de digitando/gravando (use uma instância WuzAPI).`, errorCode: 'PRESENCE_UNSUPPORTED' })
+      }
+      try {
+        await provider.setPresence(instance.instanceId ?? `inst-${instance.id}`, normalizePhone(body.data.to), body.data.state as ChatPresenceState)
+        return reply.status(200).send({ ok: true })
+      } catch (err: any) {
+        return reply.status(502).send({ error: err.message ?? 'Falha ao definir presença' })
+      }
+    },
+  })
+
+  // ── POST /instance/:id/actions/react — Reagir a uma mensagem ──
+  app.post<{ Params: { id: string } }>('/instance/:id/actions/react', {
+    preHandler: authInstance,
+    handler: async (request, reply) => {
+      const body = reactSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+      const instance = request.instance!
+      const provider = providers[instance.provider]
+      if (!provider.sendReaction) {
+        return reply.status(400).send({ error: `Provider ${instance.provider} não suporta reações (use uma instância WuzAPI).`, errorCode: 'REACTION_UNSUPPORTED' })
+      }
+      const result = await provider.sendReaction(instance.instanceId ?? `inst-${instance.id}`, normalizePhone(body.data.to), body.data.messageId, body.data.emoji ?? '')
+      if (!result.success) {
+        return reply.status(502).send({ error: result.error ?? 'Falha ao reagir' })
+      }
+      return reply.status(200).send({ ok: true })
+    },
+  })
+
+  // ── POST /instance/:id/actions/read — Marcar como lida ────────
+  app.post<{ Params: { id: string } }>('/instance/:id/actions/read', {
+    preHandler: authInstance,
+    handler: async (request, reply) => {
+      const body = readSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+      const instance = request.instance!
+      const provider = providers[instance.provider]
+      if (!provider.markRead) {
+        return reply.status(400).send({ error: `Provider ${instance.provider} não suporta confirmação de leitura (use uma instância WuzAPI).`, errorCode: 'READ_UNSUPPORTED' })
+      }
+      try {
+        await provider.markRead(instance.instanceId ?? `inst-${instance.id}`, normalizePhone(body.data.to), body.data.messageIds)
+        return reply.status(200).send({ ok: true })
+      } catch (err: any) {
+        return reply.status(502).send({ error: err.message ?? 'Falha ao marcar como lida' })
+      }
+    },
+  })
+
+  // ── POST /instance/:id/actions/check-number — Existe no WhatsApp? ─
+  app.post<{ Params: { id: string } }>('/instance/:id/actions/check-number', {
+    preHandler: authInstance,
+    handler: async (request, reply) => {
+      const body = checkNumberSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
+      }
+      const instance = request.instance!
+      const provider = providers[instance.provider]
+      if (!provider.checkNumber) {
+        return reply.status(400).send({ error: `Provider ${instance.provider} não suporta verificação de número (use uma instância WuzAPI).`, errorCode: 'CHECK_NUMBER_UNSUPPORTED' })
+      }
+      try {
+        const results = await provider.checkNumber(instance.instanceId ?? `inst-${instance.id}`, body.data.phones.map(normalizePhone))
+        return reply.status(200).send({ results })
+      } catch (err: any) {
+        return reply.status(502).send({ error: err.message ?? 'Falha ao verificar número' })
       }
     },
   })
