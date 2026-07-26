@@ -70,6 +70,12 @@ export function buildApp(): FastifyInstance {
   // Body parser para formulários HTML (application/x-www-form-urlencoded).
   app.register(formbody)
 
+  // Fallback para requisições sem corpo e sem Content-Type (ex.: fetch(url, { method: 'POST' })
+  // sem body). Direto no localhost isso não tem problema, mas atrás do Cloudflare Tunnel a
+  // requisição chega com Content-Length: 0 e Content-Type ausente, e o Fastify rejeita por
+  // padrão com FST_ERR_CTP_INVALID_MEDIA_TYPE (415 "Unsupported Media Type: undefined").
+  app.addContentTypeParser('*', (_request, _payload, done) => done(null, undefined))
+
   // View engine (Eta) para o painel server-rendered.
   const eta = new Eta({ views: path.join(__dirname, 'web', 'views') })
   app.register(view, {
