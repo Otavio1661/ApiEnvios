@@ -70,24 +70,9 @@ async function main() {
   })
   console.log(`✅ Instância criada: ${instance1.phone} (${instance1.provider}) token: ${instance1.token}`)
 
-  // Instância de fallback (WAHA) — vinculada ao cliente dev
-  const instance2 = await prisma.instance.upsert({
-    where: { apiClientId_phone: { apiClientId: devClient.id, phone: '5544999990002' } },
-    update: {},
-    create: {
-      phone: '5544999990002',
-      name: 'Suporte',
-      label: 'Número Fallback - WAHA',
-      provider: 'WAHA',
-      // Sessão WAHA real conectada no ambiente dev (engine NOWEB) é a 'default'.
-      instanceId: 'default',
-      token: 'dev-instance-token-02',
-      status: 'ACTIVE',
-      priority: 1,
-      apiClientId: devClient.id,
-    },
-  })
-  console.log(`✅ Instância criada: ${instance2.phone} (${instance2.provider}) token: ${instance2.token}`)
+  // Instância de fallback do seed (2ª): era WAHA, removido do enum Provider
+  // em 20260714120000_remove_waha_provider — o seed nunca foi atualizado e
+  // quebrava aqui a cada `prisma migrate reset` desde então.
 
   // ── Admin inicial do painel (configurável por ambiente) ──────────
   // Só executa quando ADMIN_SEED_EMAIL e ADMIN_SEED_PASSWORD estão ambos
