@@ -157,7 +157,37 @@ function mapWuzapi(payload: any): InboundStatusUpdate | null {
     return { providerId: String(providerId), status }
   }
 
-  // Message inbound de terceiros, Presence, HistorySync, etc. → ignorado.
+  // Message inbound (cliente respondendo, inclusive clique de botão).
+  // ⚠️ NÃO VERIFICADO CONTRA PAYLOAD REAL — os caminhos abaixo seguem a
+  // convenção whatsmeow/wuzapi (fonte wmiau.go: events.Message → Info.Sender +
+  // Message.buttonsResponseMessage.{selectedButtonId,selectedDisplayText}),
+  // mas até isso ser confirmado capturando um clique de verdade (ver runbook
+  // de ativação), trate os nomes de campo como a MELHOR APOSTA, não um fato.
+  if (type === 'message') {
+    const from = String(
+      evt?.event?.Info?.Sender ?? evt?.event?.info?.sender ?? evt?.Info?.Sender ?? '',
+    ).split('@')[0]
+    if (!from) return null
+
+    const msg = evt?.event?.Message ?? evt?.event?.message ?? evt?.Message
+    const btn = msg?.buttonsResponseMessage ?? msg?.buttonsResponseMessage
+    const buttonText = btn?.selectedDisplayText ?? btn?.SelectedDisplayText
+    const text = msg?.conversation ?? msg?.extendedTextMessage?.text
+
+    const providerId = evt?.event?.Info?.ID ?? evt?.event?.info?.id ?? undefined
+
+    return {
+      providerId: '',
+      inboundMessage: {
+        from,
+        buttonText: typeof buttonText === 'string' ? buttonText : undefined,
+        text: typeof text === 'string' ? text : undefined,
+        providerMessageId: typeof providerId === 'string' ? providerId : undefined,
+      },
+    }
+  }
+
+  // Presence, HistorySync, etc. → ignorado.
   return null
 }
 

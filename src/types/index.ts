@@ -140,6 +140,17 @@ export interface InboundStatusUpdate {
   status?: MessageStatus              // novo status de entrega mapeado
   connectionState?: InstanceConnState // novo estado de conexão (connection/session events)
   qrCode?: string                     // QR atualizado (qrcode.updated)
+  inboundMessage?: InboundMessage      // mensagem de entrada (texto/clique de botão) do cliente final
+}
+
+// ── Mensagem de entrada (cliente final respondendo) ───────────
+// Hoje só usado pra repassar clique de botão (quickreply) ao tenant via
+// webhook MESSAGE_RECEIVED — texto livre de entrada continua sem consumidor.
+export interface InboundMessage {
+  from: string               // telefone (com DDI) de quem respondeu
+  buttonText?: string        // texto do botão clicado (selectedDisplayText), quando aplicável
+  text?: string               // corpo em texto livre, quando não for clique de botão
+  providerMessageId?: string
 }
 
 export type InstanceConnState = 'DISCONNECTED' | 'QR_PENDING' | 'CONNECTED' | 'BANNED'
@@ -158,6 +169,7 @@ export type WebhookEvent =
   | 'NUMBER_DISCONNECTED'
   | 'MESSAGE_FAILED'
   | 'MESSAGE_DELIVERED'
+  | 'MESSAGE_RECEIVED'
   | 'PROVIDER_DOWN'
 
 export interface WebhookPayload {

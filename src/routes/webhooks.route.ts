@@ -17,6 +17,7 @@ const webhookSchema = z.object({
     'NUMBER_DISCONNECTED',
     'MESSAGE_FAILED',
     'MESSAGE_DELIVERED',
+    'MESSAGE_RECEIVED',
     'PROVIDER_DOWN',
   ])).min(1),
   secret: z.string().optional(),
@@ -91,7 +92,12 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
 
       // Resolve o InstanceNumber. 200 (não 404) se inexistente, para o provider
       // não re-tentar em loop por config de webhook órfã.
-      const number = await prisma.instanceNumber.findUnique({ where: { id: numberId } })
+      // `include: instance` é necessário pro repasse de MESSAGE_RECEIVED (precisa
+      // de instance.apiClientId e instance.id, que não existem no InstanceNumber).
+      const number = await prisma.instanceNumber.findUnique({
+        where: { id: numberId },
+        include: { instance: true },
+      })
       if (!number) {
         request.log.warn(`[Inbound] Número inexistente: ${numberId} (provider=${provider})`)
         return reply.status(200).send({ ignored: true, reason: 'number_not_found' })
@@ -119,6 +125,28 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
               connectionState: 'QR_PENDING',
             },
           })
+        }
+
+        // Mensagem de entrada (clique de botão, etc.) → repassa ao tenant via
+        // webhook próprio (MESSAGE_RECEIVED), mesmo padrão de MESSAGE_DELIVERED
+        // em applyMessageStatus() logo abaixo.
+        if (update.inboundMessage) {
+          try {
+            await dispatchWebhook(
+              'MESSAGE_RECEIVED',
+              {
+                instanceId: number.instance.id,
+                numberId: number.id,
+                from: update.inboundMessage.from,
+                buttonText: update.inboundMessage.buttonText,
+                text: update.inboundMessage.text,
+                providerMessageId: update.inboundMessage.providerMessageId,
+              },
+              number.instance.apiClientId,
+            )
+          } catch (err: any) {
+            request.log.error(`[Inbound] Falha ao repassar MESSAGE_RECEIVED: ${err.message}`)
+          }
         }
 
         return reply.status(200).send({ ok: true })

@@ -651,6 +651,51 @@ export async function instancesRoutes(app: FastifyInstance) {
     },
   })
 
+  // ── GET /instance/:id/messages/:messageId — Status de UMA mensagem ─
+  // Existe porque QUEUED (o retorno de todo POST acima) só significa
+  // "aceito na fila" — o envio de verdade acontece depois, num worker
+  // assíncrono, com ATÉ 3 tentativas e backoff exponencial (5s/10s/20s).
+  // Quem precisa saber o desfecho real ANTES de responder ao usuário final
+  // (ex.: login esperando o código chegar) não pode esperar o ciclo
+  // INTEIRO de retry (~20s+) — isso trava a tela por tempo longo demais.
+  //
+  // Por isso devolvemos `lastAttempt` além de `status`: `Message.status`
+  // só vira FAILED na ÚLTIMA tentativa (ver send-message.worker.ts:124),
+  // mas cada tentativa individual já grava um `MessageAttempt` na hora.
+  // Quem está esperando pode decidir agir já na 1ª falha (ex.: numero com
+  // restrição — normalmente as tentativas seguintes falham igual) em vez
+  // de esperar o backoff inteiro só pra descobrir o que a 1ª tentativa já
+  // sabia.
+  //
+  // Autenticado pelo MESMO token de instância dos envios — não pelo API
+  // key de tenant (`authManage`), pra não obrigar quem só manda mensagem a
+  // guardar uma segunda credencial só pra checar status.
+  app.get<{ Params: { id: string; messageId: string } }>(
+    '/instance/:id/messages/:messageId',
+    {
+      preHandler: authInstance,
+      handler: async (request, reply) => {
+        const instance = request.instance!
+        const message = await prisma.message.findFirst({
+          where: { id: request.params.messageId, instanceId: instance.id },
+          include: { attempts: { orderBy: { attempt: 'desc' }, take: 1 } },
+        })
+        if (!message) return reply.status(404).send({ error: 'Mensagem não encontrada' })
+
+        const ultimaTentativa = message.attempts[0]
+
+        return reply.send({
+          id: message.id,
+          status: message.status,
+          errorMessage: message.errorMessage,
+          lastAttempt: ultimaTentativa
+            ? { attempt: ultimaTentativa.attempt, success: ultimaTentativa.success, errorMsg: ultimaTentativa.errorMsg }
+            : null,
+        })
+      },
+    },
+  )
+
   // ── POST /instance/:id/messages/media — Mídia ─────────────────
   app.post<{ Params: { id: string } }>('/instance/:id/messages/media', {
     preHandler: authInstance,

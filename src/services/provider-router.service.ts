@@ -176,6 +176,29 @@ async function dispatchToNumber(
   return { success: false, provider: number.provider, numberId: number.id, error: result.error }
 }
 
+// ── Preferência por capacidade, ANTES do rodízio menos-usado ──
+// Tipos ricos (BUTTONS/LOCATION/CONTACT/POLL) só existem no WuzAPI. Sem esta
+// ordenação, o rodízio "menos-usado" podia escolher um número Evolution para
+// um payload de botões, queimar a tentativa com BUTTONS_UNSUPPORTED e só então
+// rotacionar — barulho no log e uma ida ao provider à toa. Números capazes vão
+// para a frente da fila; entre eles a ordem menos-usado (anti-ban) é mantida,
+// e os incapazes continuam no fim como último recurso.
+const TIPOS_SO_WUZAPI: ReadonlyArray<SendMessagePayload['type']> = ['BUTTONS', 'LOCATION', 'CONTACT', 'POLL']
+
+function orderPoolForPayload(pool: InstanceNumber[], payload: SendMessagePayload): InstanceNumber[] {
+  if (!TIPOS_SO_WUZAPI.includes(payload.type)) return pool
+
+  const capaz = (n: InstanceNumber): boolean => {
+    const p = providers[n.provider]
+    if (payload.type === 'BUTTONS') return typeof p?.sendButtons === 'function'
+    if (payload.type === 'LOCATION') return typeof p?.sendLocation === 'function'
+    if (payload.type === 'CONTACT') return typeof p?.sendContact === 'function'
+    return typeof p?.sendPoll === 'function'
+  }
+
+  return [...pool.filter(capaz), ...pool.filter((n) => !capaz(n))]
+}
+
 // ── Despacha por uma INSTÂNCIA (pool de números) com rodízio ───
 // Seleciona os números elegíveis do pool (menos-usado primeiro) e tenta enviar.
 // Se o melhor número falhar e houver outros elegíveis, ROTACIONA para o próximo.
@@ -185,7 +208,7 @@ async function dispatchToInstance(
   instance: Instance,
   payload: SendMessagePayload,
 ): Promise<DispatchResult> {
-  const pool = await eligiblePoolNumbers(instance.id)
+  const pool = orderPoolForPayload(await eligiblePoolNumbers(instance.id), payload)
 
   if (pool.length === 0) {
     return { success: false, provider: instance.provider, error: 'Nenhum número disponível no pool' }
