@@ -174,14 +174,22 @@ const manageUserSchema = z.object({
   role: z.enum(['OWNER', 'MEMBER', 'SUPER_ADMIN']).default('OWNER'),
 })
 
-// Atualização da quota (maxInstances) de uma conta — só super admin.
-const manageQuotaSchema = z.object({
+// Edição consolidada da conta (tela de detalhe) — substitui os antigos forms
+// separados de quota/limite: agora é um único form com todos os campos.
+const manageClientEditSchema = z.object({
+  name: z.string().min(1, 'Informe o nome da conta.'),
+  role: z.enum(['ADMIN', 'CLIENT']).default('CLIENT'),
+  fallbackEnabled: z.boolean().default(false),
+  rateLimit: z.coerce.number().int().positive(),
   maxInstances: z.coerce.number().int().positive(),
+  maxPerRecipientPerHour: z.coerce.number().int().min(0),
+  active: z.boolean().default(false),
 })
 
-// Atualização do teto anti-flood por destinatário (Fase 1) — só super admin. 0 = ilimitado.
-const manageLimitSchema = z.object({
-  maxPerRecipientPerHour: z.coerce.number().int().min(0),
+// Edição de usuário (nome/papel) a partir do detalhe da conta.
+const manageUserEditSchema = z.object({
+  name: z.string().optional(),
+  role: z.enum(['OWNER', 'MEMBER', 'SUPER_ADMIN']).optional(),
 })
 
 // Time (OWNER): criar membro da própria conta (papel sempre MEMBER).
@@ -226,6 +234,13 @@ function emptyToUndefined(value: unknown): unknown {
   return typeof value === 'string' && value.trim() === '' ? undefined : value
 }
 
+// Whitelist do redirect pós-ação da Gestão (campo oculto `returnTo` dos forms):
+// só aceita caminhos dentro de /admin/manage, nunca uma URL arbitrária vinda do body.
+function safeManageReturnTo(value: unknown, fallback = '/admin/manage'): string {
+  if (typeof value === 'string' && value.startsWith('/admin/manage')) return value
+  return fallback
+}
+
 const createInstanceSchema = z.object({
   name: z.string().optional(),
   slug: slugSchema.optional(),
@@ -256,13 +271,26 @@ const addNumberFormSchema = z.object({
 export async function panelRoutes(app: FastifyInstance) {
   // ── GET /login ─────────────────────────────────────────────
   app.get('/login', async (request, reply) => {
-    // Se já logado (cookie válido), vai direto pro dashboard.
+    // Se já logado, vai direto pro dashboard. "Logado" precisa checar user +
+    // apiClient no banco (não só a assinatura do JWT) — senão um cookie órfão
+    // (usuário apagado, conta desativada, banco resetado) causa loop infinito
+    // com requirePanelAuth: /admin manda pra /login (JWT "válido" mas usuário
+    // sumiu) e /login manda de volta pra /admin (só olhou a assinatura).
     if (request.cookies?.[COOKIE_NAME]) {
       try {
-        await request.jwtVerify()
-        return reply.redirect('/admin')
+        const payload = await request.jwtVerify<{ userId: string }>()
+        const user = await prisma.user.findUnique({
+          where: { id: payload.userId },
+          include: { apiClient: true },
+        })
+        if (user && user.apiClient.active) {
+          return reply.redirect('/admin')
+        }
+        // Cookie com assinatura válida mas órfão (usuário/conta não existe
+        // mais) — limpa pra não voltar a cair no loop na próxima visita.
+        reply.clearCookie(COOKIE_NAME, cookieOptions())
       } catch {
-        // cookie inválido → mostra login normalmente
+        // JWT inválido/expirado → mostra login normalmente
       }
     }
     return renderPage(app, reply, 'login', { title: 'Entrar — ApiEnvios' })
@@ -840,15 +868,12 @@ export async function panelRoutes(app: FastifyInstance) {
   // de provisionamento — MESMA regra de negócio da API REST admin).
   // ══════════════════════════════════════════════════════════
 
-  // ── GET /manage — Página de gestão (contas + usuários) ─────
+  // ── GET /manage — Aba "Contas" (lista) ──────────────────────
   app.get<{ Querystring: { ok?: string; err?: string } }>(
     '/manage',
     { preHandler: requirePanelAdmin },
     async (request, reply) => {
-      const [clients, users] = await Promise.all([listClients(), listUsers()])
-      // Mapa id→nome da conta para exibir o tenant de cada usuário na tabela.
-      const clientNames: Record<string, string> = {}
-      for (const c of clients) clientNames[c.id] = c.name
+      const clients = await listClients()
 
       return renderPage(
         app,
@@ -856,12 +881,87 @@ export async function panelRoutes(app: FastifyInstance) {
         'manage',
         {
           title: 'Gestão — ApiEnvios',
-          // user no corpo da view (layoutData é separado) para marcar "você".
           user: request.authUser,
           currentClientId: request.apiClient!.id,
           clients,
+          ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
+          err: request.query.err ? decodeURIComponent(request.query.err) : null,
+        },
+        { user: request.authUser, isAdmin: true, activeNav: 'manage' },
+      )
+    },
+  )
+
+  // ── GET /manage/users — Aba "Usuários" (lista global) ───────
+  app.get<{ Querystring: { ok?: string; err?: string } }>(
+    '/manage/users',
+    { preHandler: requirePanelAdmin },
+    async (request, reply) => {
+      const [clients, users] = await Promise.all([listClients(), listUsers()])
+      const clientNames: Record<string, string> = {}
+      for (const c of clients) clientNames[c.id] = c.name
+
+      return renderPage(
+        app,
+        reply,
+        'manage-users',
+        {
+          title: 'Gestão — Usuários — ApiEnvios',
+          currentUserId: request.authUser!.id,
+          clients,
           users,
           clientNames,
+          ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
+          err: request.query.err ? decodeURIComponent(request.query.err) : null,
+        },
+        { user: request.authUser, isAdmin: true, activeNav: 'manage' },
+      )
+    },
+  )
+
+  // ── GET /manage/clients/new — Formulário de nova conta ──────
+  app.get<{ Querystring: { err?: string } }>(
+    '/manage/clients/new',
+    { preHandler: requirePanelAdmin },
+    async (request, reply) => {
+      return renderPage(
+        app,
+        reply,
+        'manage-client-new',
+        {
+          title: 'Nova conta — ApiEnvios',
+          err: request.query.err ? decodeURIComponent(request.query.err) : null,
+        },
+        { user: request.authUser, isAdmin: true, activeNav: 'manage' },
+      )
+    },
+  )
+
+  // ── GET /manage/clients/:id — Detalhe da conta (editar tudo) ─
+  app.get<{ Params: { id: string }; Querystring: { ok?: string; err?: string } }>(
+    '/manage/clients/:id',
+    { preHandler: requirePanelAdmin },
+    async (request, reply) => {
+      const client = await prisma.apiClient.findUnique({ where: { id: request.params.id } })
+      if (!client) {
+        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Conta não encontrada.')}`)
+      }
+      const [instances, users] = await Promise.all([
+        listInstancesWithConnection(client.id),
+        listUsers(client.id),
+      ])
+
+      return renderPage(
+        app,
+        reply,
+        'manage-client-detail',
+        {
+          title: `${client.name} — Gestão — ApiEnvios`,
+          client,
+          instances,
+          users,
+          currentClientId: request.apiClient!.id,
+          currentUserId: request.authUser!.id,
           ok: request.query.ok ? decodeURIComponent(request.query.ok) : null,
           err: request.query.err ? decodeURIComponent(request.query.err) : null,
         },
@@ -888,30 +988,37 @@ export async function panelRoutes(app: FastifyInstance) {
 
     if (!parsed.success) {
       const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
-      return reply.redirect(`/admin/manage?err=${encodeURIComponent(msg)}`)
+      return reply.redirect(`/admin/manage/clients/new?err=${encodeURIComponent(msg)}`)
     }
 
     try {
       const { client } = await createClientWithOwner(parsed.data)
       return reply.redirect(
-        `/admin/manage?ok=${encodeURIComponent(`Conta "${client.name}" criada com sucesso.`)}`,
+        `/admin/manage/clients/${client.id}?ok=${encodeURIComponent(`Conta "${client.name}" criada com sucesso.`)}`,
       )
     } catch (err: any) {
       if (err instanceof ProvisioningError && err.code === 'EMAIL_TAKEN') {
         return reply.redirect(
-          `/admin/manage?err=${encodeURIComponent('E-mail de owner já cadastrado.')}`,
+          `/admin/manage/clients/new?err=${encodeURIComponent('E-mail de owner já cadastrado.')}`,
         )
       }
       request.log.error(`[Painel] Falha ao criar conta: ${err.message}`)
       return reply.redirect(
-        `/admin/manage?err=${encodeURIComponent('Falha ao criar a conta.')}`,
+        `/admin/manage/clients/new?err=${encodeURIComponent('Falha ao criar a conta.')}`,
       )
     }
   })
 
   // ── POST /manage/users — Cria usuário vinculado a uma conta ─
+  // `origin`/`apiClientId` (campos ocultos do form) decidem pra onde voltar:
+  // veio do detalhe da conta → volta pro detalhe; veio da aba Usuários → fica lá.
   app.post('/manage/users', { preHandler: requirePanelAdmin }, async (request, reply) => {
     const raw = (request.body ?? {}) as Record<string, unknown>
+    const backTo =
+      raw.origin === 'client-detail' && typeof raw.apiClientId === 'string'
+        ? `/admin/manage/clients/${raw.apiClientId}`
+        : '/admin/manage/users'
+
     const parsed = manageUserSchema.safeParse({
       apiClientId: raw.apiClientId,
       email: raw.email,
@@ -922,13 +1029,13 @@ export async function panelRoutes(app: FastifyInstance) {
 
     if (!parsed.success) {
       const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
-      return reply.redirect(`/admin/manage?err=${encodeURIComponent(msg)}`)
+      return reply.redirect(`${backTo}?err=${encodeURIComponent(msg)}`)
     }
 
     try {
       const user = await createUserForClient(parsed.data)
       return reply.redirect(
-        `/admin/manage?ok=${encodeURIComponent(`Usuário "${user.email}" criado com sucesso.`)}`,
+        `${backTo}?ok=${encodeURIComponent(`Usuário "${user.email}" criado com sucesso.`)}`,
       )
     } catch (err: any) {
       if (err instanceof ProvisioningError) {
@@ -936,84 +1043,104 @@ export async function panelRoutes(app: FastifyInstance) {
           err.code === 'CLIENT_NOT_FOUND'
             ? 'Conta selecionada não encontrada.'
             : 'E-mail já cadastrado.'
-        return reply.redirect(`/admin/manage?err=${encodeURIComponent(msg)}`)
+        return reply.redirect(`${backTo}?err=${encodeURIComponent(msg)}`)
       }
       request.log.error(`[Painel] Falha ao criar usuário: ${err.message}`)
       return reply.redirect(
-        `/admin/manage?err=${encodeURIComponent('Falha ao criar o usuário.')}`,
+        `${backTo}?err=${encodeURIComponent('Falha ao criar o usuário.')}`,
       )
     }
   })
 
   // ── POST /manage/users/:id/delete — Remove usuário ─────────
-  // POST porque formulário HTML não emite DELETE nativamente.
+  // POST porque formulário HTML não emite DELETE nativamente. `returnTo`
+  // (campo oculto do form) manda de volta pra tela de onde veio o clique
+  // (detalhe da conta ou a aba global de usuários).
   app.post<{ Params: { id: string } }>(
     '/manage/users/:id/delete',
     { preHandler: requirePanelAdmin },
     async (request, reply) => {
+      const backTo = safeManageReturnTo((request.body as Record<string, unknown>)?.returnTo, '/admin/manage/users')
+
       // Trava de segurança: admin não pode remover a própria conta de acesso.
       if (request.params.id === request.authUser!.id) {
         return reply.redirect(
-          `/admin/manage?err=${encodeURIComponent('Você não pode remover o próprio usuário.')}`,
+          `${backTo}?err=${encodeURIComponent('Você não pode remover o próprio usuário.')}`,
         )
       }
       const removed = await deleteUser(request.params.id)
       const msg = removed ? 'Usuário removido.' : 'Usuário não encontrado.'
       const key = removed ? 'ok' : 'err'
-      return reply.redirect(`/admin/manage?${key}=${encodeURIComponent(msg)}`)
+      return reply.redirect(`${backTo}?${key}=${encodeURIComponent(msg)}`)
     },
   )
 
-  // ── POST /manage/clients/:id/quota — Atualiza a quota (maxInstances) ─
+  // ── POST /manage/users/:id/edit — Edita nome/papel do usuário ─
   app.post<{ Params: { id: string } }>(
-    '/manage/clients/:id/quota',
+    '/manage/users/:id/edit',
     { preHandler: requirePanelAdmin },
     async (request, reply) => {
-      const parsed = manageQuotaSchema.safeParse({
-        maxInstances: (request.body as Record<string, unknown>)?.maxInstances,
+      const raw = (request.body ?? {}) as Record<string, unknown>
+      const parsed = manageUserEditSchema.safeParse({
+        name: emptyToUndefined(raw.name),
+        role: emptyToUndefined(raw.role),
       })
       if (!parsed.success) {
-        return reply.redirect(
-          `/admin/manage?err=${encodeURIComponent('Quota inválida (use um inteiro positivo).')}`,
-        )
+        const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
+        return reply.redirect(`/admin/manage/users?err=${encodeURIComponent(msg)}`)
       }
+
       try {
-        await prisma.apiClient.update({
-          where: { id: request.params.id },
-          data: { maxInstances: parsed.data.maxInstances },
-        })
+        const user = await updateUser(request.params.id, parsed.data)
         return reply.redirect(
-          `/admin/manage?ok=${encodeURIComponent('Quota atualizada.')}`,
+          `/admin/manage/clients/${user.apiClientId}?ok=${encodeURIComponent('Usuário atualizado.')}`,
         )
       } catch (err: any) {
-        request.log.error(`[Painel] Falha ao atualizar quota: ${err.message}`)
-        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Falha ao atualizar a quota.')}`)
+        if (err instanceof ProvisioningError && err.code === 'USER_NOT_FOUND') {
+          return reply.redirect(`/admin/manage/users?err=${encodeURIComponent('Usuário não encontrado.')}`)
+        }
+        request.log.error(`[Painel] Falha ao editar usuário: ${err.message}`)
+        return reply.redirect(`/admin/manage/users?err=${encodeURIComponent('Falha ao editar o usuário.')}`)
       }
     },
   )
 
-  // ── POST /manage/clients/:id/limit — Teto anti-flood por destinatário (Fase 1) ─
+  // ── POST /manage/clients/:id/edit — Edição consolidada da conta ─
+  // Substitui os antigos /quota e /limit: um único form no detalhe da conta
+  // edita nome, tipo, rate limit, quota, teto por destinatário, fallback e status.
   app.post<{ Params: { id: string } }>(
-    '/manage/clients/:id/limit',
+    '/manage/clients/:id/edit',
     { preHandler: requirePanelAdmin },
     async (request, reply) => {
-      const parsed = manageLimitSchema.safeParse({
-        maxPerRecipientPerHour: (request.body as Record<string, unknown>)?.maxPerRecipientPerHour,
+      const raw = (request.body ?? {}) as Record<string, unknown>
+      const parsed = manageClientEditSchema.safeParse({
+        name: raw.name,
+        role: emptyToUndefined(raw.role),
+        fallbackEnabled: raw.fallbackEnabled === 'on' || raw.fallbackEnabled === 'true',
+        active: raw.active === 'on' || raw.active === 'true',
+        rateLimit: emptyToUndefined(raw.rateLimit),
+        maxInstances: emptyToUndefined(raw.maxInstances),
+        maxPerRecipientPerHour: emptyToUndefined(raw.maxPerRecipientPerHour),
       })
+
       if (!parsed.success) {
-        return reply.redirect(
-          `/admin/manage?err=${encodeURIComponent('Limite inválido (use 0 ou um inteiro positivo).')}`,
-        )
+        const msg = parsed.error.issues[0]?.message ?? 'Dados inválidos.'
+        return reply.redirect(`/admin/manage/clients/${request.params.id}?err=${encodeURIComponent(msg)}`)
       }
+
       try {
-        await updateClient(request.params.id, { maxPerRecipientPerHour: parsed.data.maxPerRecipientPerHour })
-        return reply.redirect(`/admin/manage?ok=${encodeURIComponent('Limite por destinatário atualizado.')}`)
+        await updateClient(request.params.id, parsed.data)
+        return reply.redirect(
+          `/admin/manage/clients/${request.params.id}?ok=${encodeURIComponent('Conta atualizada.')}`,
+        )
       } catch (err: any) {
         if (err instanceof ProvisioningError && err.code === 'CLIENT_NOT_FOUND') {
           return reply.redirect(`/admin/manage?err=${encodeURIComponent('Conta não encontrada.')}`)
         }
-        request.log.error(`[Painel] Falha ao atualizar limite: ${err.message}`)
-        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Falha ao atualizar o limite.')}`)
+        request.log.error(`[Painel] Falha ao editar conta: ${err.message}`)
+        return reply.redirect(
+          `/admin/manage/clients/${request.params.id}?err=${encodeURIComponent('Falha ao editar a conta.')}`,
+        )
       }
     },
   )
@@ -1023,6 +1150,7 @@ export async function panelRoutes(app: FastifyInstance) {
     '/manage/clients/:id/toggle-active',
     { preHandler: requirePanelAdmin },
     async (request, reply) => {
+      const backTo = safeManageReturnTo((request.body as Record<string, unknown>)?.returnTo)
       const current = await prisma.apiClient.findUnique({
         where: { id: request.params.id },
         select: { active: true },
@@ -1033,10 +1161,10 @@ export async function panelRoutes(app: FastifyInstance) {
       try {
         const updated = await updateClient(request.params.id, { active: !current.active })
         const msg = updated.active ? 'Conta ativada.' : 'Conta desativada.'
-        return reply.redirect(`/admin/manage?ok=${encodeURIComponent(msg)}`)
+        return reply.redirect(`${backTo}?ok=${encodeURIComponent(msg)}`)
       } catch (err: any) {
         request.log.error(`[Painel] Falha ao alternar status: ${err.message}`)
-        return reply.redirect(`/admin/manage?err=${encodeURIComponent('Falha ao alterar o status da conta.')}`)
+        return reply.redirect(`${backTo}?err=${encodeURIComponent('Falha ao alterar o status da conta.')}`)
       }
     },
   )

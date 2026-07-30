@@ -361,7 +361,9 @@ export class WuzapiProvider implements IWhatsappProvider {
   }
 
   isBanError(errorMsg: string): boolean {
-    const banSignals = ['banned', 'blocked', 'unauthorized', '403', 'logged out', 'not logged in']
+    // '463' = restrição de conta que a própria WhatsApp devolve ao enviar
+    // (diferente de '403', que é erro de autenticação/permissão da WuzAPI).
+    const banSignals = ['banned', 'blocked', 'unauthorized', '403', '463', 'logged out', 'not logged in']
     return banSignals.some(s => errorMsg.toLowerCase().includes(s.toLowerCase()))
   }
 

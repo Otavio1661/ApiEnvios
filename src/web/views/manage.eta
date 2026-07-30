@@ -1,9 +1,9 @@
 <div class="page-head">
   <div>
-    <a href="/admin" class="muted">&larr; Voltar</a>
     <h1>Gestão</h1>
-    <p class="muted">Crie e administre contas (tenants) e usuários da plataforma.</p>
+    <p class="muted">Contas (tenants) e usuários da plataforma.</p>
   </div>
+  <a href="/admin/manage/clients/new" class="btn btn-primary">+ Nova conta</a>
 </div>
 
 <% if (it.ok) { %>
@@ -13,101 +13,12 @@
   <div class="alert alert-error"><%= it.err %></div>
 <% } %>
 
-<div class="grid-2">
-  <!-- ── Criar conta (tenant) ─────────────────────────────── -->
-  <div class="card">
-    <h2>Nova conta</h2>
-    <form method="POST" action="/admin/manage/clients" class="form">
-      <label class="field">
-        <span>Nome da conta *</span>
-        <input type="text" name="name" placeholder="Ex: Loja Centro" required />
-      </label>
-      <label class="field">
-        <span>Tipo</span>
-        <select name="role">
-          <option value="CLIENT">CLIENT</option>
-          <option value="ADMIN">ADMIN</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Limite de envios (rate limit)</span>
-        <input type="number" name="rateLimit" value="100" min="1" />
-      </label>
-      <label class="field">
-        <span>Quota de instâncias (máx.)</span>
-        <input type="number" name="maxInstances" value="1" min="1" />
-      </label>
-      <label class="field">
-        <span>Limite por destinatário/hora (0 = ilimitado)</span>
-        <input type="number" name="maxPerRecipientPerHour" value="10" min="0" />
-      </label>
-      <label class="field-check">
-        <input type="checkbox" name="fallbackEnabled" />
-        <span>Habilitar fallback entre providers</span>
-      </label>
-
-      <p class="muted section-label">Owner inicial (opcional)</p>
-      <label class="field">
-        <span>E-mail do owner</span>
-        <input type="email" name="ownerEmail" placeholder="owner@empresa.com" />
-      </label>
-      <label class="field">
-        <span>Senha do owner (mín. 8)</span>
-        <input type="password" name="ownerPassword" minlength="8" autocomplete="new-password" />
-      </label>
-      <label class="field">
-        <span>Nome do owner</span>
-        <input type="text" name="ownerName" placeholder="Nome completo" />
-      </label>
-
-      <button type="submit" class="btn btn-primary">Criar conta</button>
-    </form>
-  </div>
-
-  <!-- ── Criar usuário ────────────────────────────────────── -->
-  <div class="card">
-    <h2>Novo usuário</h2>
-    <% if (it.clients.length === 0) { %>
-      <p class="muted">Crie uma conta antes de adicionar usuários.</p>
-    <% } else { %>
-    <form method="POST" action="/admin/manage/users" class="form">
-      <label class="field">
-        <span>Conta *</span>
-        <select name="apiClientId" required>
-          <% it.clients.forEach(function(c){ %>
-            <option value="<%= c.id %>"><%= c.name %> (<%= c.role %>)</option>
-          <% }) %>
-        </select>
-      </label>
-      <label class="field">
-        <span>E-mail *</span>
-        <input type="email" name="email" placeholder="usuario@empresa.com" required />
-      </label>
-      <label class="field">
-        <span>Senha (mín. 8) *</span>
-        <input type="password" name="password" minlength="8" required autocomplete="new-password" />
-      </label>
-      <label class="field">
-        <span>Nome</span>
-        <input type="text" name="name" placeholder="Nome completo" />
-      </label>
-      <label class="field">
-        <span>Papel</span>
-        <select name="role">
-          <option value="OWNER">Admin (gerencia a conta)</option>
-          <option value="MEMBER">Usuário (membro)</option>
-          <option value="SUPER_ADMIN">Super Admin (plataforma)</option>
-        </select>
-      </label>
-      <button type="submit" class="btn btn-primary">Criar usuário</button>
-    </form>
-    <% } %>
-  </div>
+<div class="tabs">
+  <a href="/admin/manage" class="tab active">Contas (<%= it.clients.length %>)</a>
+  <a href="/admin/manage/users" class="tab">Usuários</a>
 </div>
 
-<!-- ── Tabela de contas ───────────────────────────────────── -->
 <div class="card">
-  <h2>Contas (<%= it.clients.length %>)</h2>
   <table class="instances-table">
     <thead>
       <tr>
@@ -115,8 +26,6 @@
         <th>Tipo</th>
         <th>Ativa</th>
         <th>Instâncias</th>
-        <th>Quota</th>
-        <th>Teto/destino/h</th>
         <th>Usuários</th>
         <th>Enviadas</th>
         <th>Ações</th>
@@ -124,80 +33,32 @@
     </thead>
     <tbody>
       <% if (it.clients.length === 0) { %>
-        <tr><td colspan="9" class="muted center">Nenhuma conta ainda.</td></tr>
+        <tr><td colspan="7" class="muted center">Nenhuma conta ainda.</td></tr>
       <% } %>
       <% it.clients.forEach(function(c){ %>
         <tr>
-          <td><strong><%= c.name %></strong><br/><code class="muted"><%= c.id %></code></td>
+          <td>
+            <a href="/admin/manage/clients/<%= c.id %>"><strong><%= c.name %></strong></a>
+            <br/><code class="muted"><%= c.id %></code>
+          </td>
           <td><span class="badge badge-msg"><%= c.role %></span></td>
           <td><%= c.active ? 'Sim' : 'Não' %></td>
           <td><%= c._count.instances %> / <%= c.maxInstances %></td>
-          <td>
-            <form method="POST" action="/admin/manage/clients/<%= c.id %>/quota" class="inline" style="display:flex;gap:4px;align-items:center">
-              <input type="number" name="maxInstances" value="<%= c.maxInstances %>" min="1" style="width:60px" />
-              <button type="submit" class="btn btn-ghost">OK</button>
-            </form>
-          </td>
-          <td>
-            <form method="POST" action="/admin/manage/clients/<%= c.id %>/limit" class="inline" style="display:flex;gap:4px;align-items:center">
-              <input type="number" name="maxPerRecipientPerHour" value="<%= c.maxPerRecipientPerHour %>" min="0" style="width:60px" title="0 = ilimitado" />
-              <button type="submit" class="btn btn-ghost">OK</button>
-            </form>
-          </td>
           <td><%= c._count.users %></td>
           <td><%= c.totalSent %></td>
           <td style="display:flex;gap:4px;flex-wrap:wrap">
+            <a href="/admin/manage/clients/<%= c.id %>" class="btn btn-ghost btn-sm">Ver / editar</a>
             <form method="POST" action="/admin/manage/clients/<%= c.id %>/toggle-active" class="inline">
-              <button type="submit" class="btn btn-ghost"><%= c.active ? 'Desativar' : 'Ativar' %></button>
+              <input type="hidden" name="returnTo" value="/admin/manage" />
+              <button type="submit" class="btn btn-ghost btn-sm"><%= c.active ? 'Desativar' : 'Ativar' %></button>
             </form>
             <% if (c.id !== it.currentClientId) { %>
               <form method="POST" action="/admin/manage/clients/<%= c.id %>/delete" class="inline"
                     onsubmit="return confirm('APAGAR DEFINITIVAMENTE a conta &quot;<%= c.name %>&quot; e TODOS os dados (instâncias, mensagens, usuários)? Esta ação é irreversível.')">
-                <button type="submit" class="btn btn-ghost btn-danger">Apagar</button>
+                <button type="submit" class="btn btn-ghost btn-sm btn-danger">Apagar</button>
               </form>
             <% } else { %>
               <span class="muted">atual</span>
-            <% } %>
-          </td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
-</div>
-
-<!-- ── Tabela de usuários ─────────────────────────────────── -->
-<div class="card">
-  <h2>Usuários (<%= it.users.length %>)</h2>
-  <table class="instances-table">
-    <thead>
-      <tr>
-        <th>E-mail</th>
-        <th>Nome</th>
-        <th>Papel</th>
-        <th>Conta</th>
-        <th>Criado em</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      <% if (it.users.length === 0) { %>
-        <tr><td colspan="6" class="muted center">Nenhum usuário ainda.</td></tr>
-      <% } %>
-      <% it.users.forEach(function(u){ %>
-        <tr>
-          <td><%= u.email %></td>
-          <td><%= u.name || '—' %></td>
-          <td><span class="badge badge-msg"><%= u.role === 'SUPER_ADMIN' ? 'Super Admin' : (u.role === 'OWNER' ? 'Admin' : 'Usuário') %></span></td>
-          <td><%= it.clientNames[u.apiClientId] || u.apiClientId %></td>
-          <td><%= new Date(u.createdAt).toLocaleString('pt-BR') %></td>
-          <td>
-            <% if (u.id === it.user.id) { %>
-              <span class="muted">você</span>
-            <% } else { %>
-              <form method="POST" action="/admin/manage/users/<%= u.id %>/delete" class="inline"
-                    onsubmit="return confirm('Remover o usuário <%= u.email %>?')">
-                <button type="submit" class="btn btn-ghost btn-danger">Remover</button>
-              </form>
             <% } %>
           </td>
         </tr>

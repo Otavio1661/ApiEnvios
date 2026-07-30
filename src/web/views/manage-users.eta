@@ -1,0 +1,119 @@
+<div class="page-head">
+  <div>
+    <h1>Gestão</h1>
+    <p class="muted">Contas (tenants) e usuários da plataforma.</p>
+  </div>
+</div>
+
+<% if (it.ok) { %>
+  <div class="alert alert-ok"><%= it.ok %></div>
+<% } %>
+<% if (it.err) { %>
+  <div class="alert alert-error"><%= it.err %></div>
+<% } %>
+
+<div class="tabs">
+  <a href="/admin/manage" class="tab">Contas (<%= it.clients.length %>)</a>
+  <a href="/admin/manage/users" class="tab active">Usuários (<%= it.users.length %>)</a>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h2>Novo usuário</h2>
+    <% if (it.clients.length === 0) { %>
+      <p class="muted">Crie uma conta antes de adicionar usuários.</p>
+    <% } else { %>
+    <form method="POST" action="/admin/manage/users" class="form">
+      <input type="hidden" name="origin" value="users-list" />
+      <label class="field">
+        <span>Conta *</span>
+        <select name="apiClientId" required>
+          <% it.clients.forEach(function(c){ %>
+            <option value="<%= c.id %>"><%= c.name %> (<%= c.role %>)</option>
+          <% }) %>
+        </select>
+      </label>
+      <label class="field">
+        <span>E-mail *</span>
+        <input type="email" name="email" placeholder="usuario@empresa.com" required />
+      </label>
+      <label class="field">
+        <span>Senha (mín. 8) *</span>
+        <input type="password" name="password" minlength="8" required autocomplete="new-password" />
+      </label>
+      <label class="field">
+        <span>Nome</span>
+        <input type="text" name="name" placeholder="Nome completo" />
+      </label>
+      <label class="field">
+        <span>Papel</span>
+        <select name="role">
+          <option value="OWNER">Admin (gerencia a conta)</option>
+          <option value="MEMBER">Usuário (membro)</option>
+          <option value="SUPER_ADMIN">Super Admin (plataforma)</option>
+        </select>
+      </label>
+      <button type="submit" class="btn btn-primary">Criar usuário</button>
+    </form>
+    <% } %>
+  </div>
+
+  <div class="card">
+    <h2>Todas as contas</h2>
+    <p class="muted" style="margin-bottom:10px">Pra editar papel/nome de um usuário específico, entre na conta dele.</p>
+    <table class="instances-table">
+      <thead>
+        <tr><th>Conta</th><th>Usuários</th></tr>
+      </thead>
+      <tbody>
+        <% it.clients.forEach(function(c){ %>
+          <tr>
+            <td><a href="/admin/manage/clients/<%= c.id %>"><%= c.name %></a></td>
+            <td><%= c._count.users %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Usuários (<%= it.users.length %>)</h2>
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>E-mail</th>
+        <th>Nome</th>
+        <th>Papel</th>
+        <th>Conta</th>
+        <th>Criado em</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (it.users.length === 0) { %>
+        <tr><td colspan="6" class="muted center">Nenhum usuário ainda.</td></tr>
+      <% } %>
+      <% it.users.forEach(function(u){ %>
+        <tr>
+          <td><%= u.email %></td>
+          <td><%= u.name || '—' %></td>
+          <td><span class="badge badge-role-<%= u.role %>"><%= u.role === 'SUPER_ADMIN' ? 'Super Admin' : (u.role === 'OWNER' ? 'Admin' : 'Usuário') %></span></td>
+          <td><a href="/admin/manage/clients/<%= u.apiClientId %>"><%= it.clientNames[u.apiClientId] || u.apiClientId %></a></td>
+          <td><%= new Date(u.createdAt).toLocaleString('pt-BR') %></td>
+          <td>
+            <% if (u.id === it.currentUserId) { %>
+              <span class="muted">você</span>
+            <% } else { %>
+              <form method="POST" action="/admin/manage/users/<%= u.id %>/delete" class="inline"
+                    onsubmit="return confirm('Remover o usuário <%= u.email %>?')">
+                <input type="hidden" name="returnTo" value="/admin/manage/users" />
+                <button type="submit" class="btn btn-ghost btn-sm btn-danger">Remover</button>
+              </form>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

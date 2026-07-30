@@ -1,0 +1,59 @@
+<div class="page-head">
+  <div>
+    <a href="/admin/manage" class="back-link">&larr; Voltar</a>
+    <h1>Nova conta</h1>
+    <p class="muted">Cria um tenant novo na plataforma.</p>
+  </div>
+</div>
+
+<% if (it.err) { %>
+  <div class="alert alert-error"><%= it.err %></div>
+<% } %>
+
+<div class="card" style="max-width:520px">
+  <form method="POST" action="/admin/manage/clients" class="form">
+    <label class="field">
+      <span>Nome da conta *</span>
+      <input type="text" name="name" placeholder="Ex: Loja Centro" required />
+    </label>
+    <label class="field">
+      <span>Tipo</span>
+      <select name="role">
+        <option value="CLIENT">CLIENT</option>
+        <option value="ADMIN">ADMIN</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Limite de envios (rate limit)</span>
+      <input type="number" name="rateLimit" value="100" min="1" />
+    </label>
+    <label class="field">
+      <span>Quota de instâncias (máx.)</span>
+      <input type="number" name="maxInstances" value="1" min="1" />
+    </label>
+    <label class="field">
+      <span>Limite por destinatário/hora (0 = ilimitado)</span>
+      <input type="number" name="maxPerRecipientPerHour" value="10" min="0" />
+    </label>
+    <label class="field-check">
+      <input type="checkbox" name="fallbackEnabled" />
+      <span>Habilitar fallback entre providers</span>
+    </label>
+
+    <p class="muted section-label">Owner inicial (opcional)</p>
+    <label class="field">
+      <span>E-mail do owner</span>
+      <input type="email" name="ownerEmail" placeholder="owner@empresa.com" />
+    </label>
+    <label class="field">
+      <span>Senha do owner (mín. 8)</span>
+      <input type="password" name="ownerPassword" minlength="8" autocomplete="new-password" />
+    </label>
+    <label class="field">
+      <span>Nome do owner</span>
+      <input type="text" name="ownerName" placeholder="Nome completo" />
+    </label>
+
+    <button type="submit" class="btn btn-primary btn-block">Criar conta</button>
+  </form>
+</div>

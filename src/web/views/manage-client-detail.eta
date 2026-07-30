@@ -1,0 +1,196 @@
+<div class="page-head">
+  <div>
+    <a href="/admin/manage" class="back-link">&larr; Voltar</a>
+    <h1><%= it.client.name %> <span class="badge badge-msg"><%= it.client.role %></span></h1>
+    <p class="muted">Conta criada em <%= new Date(it.client.createdAt).toLocaleString('pt-BR') %> · <code class="muted"><%= it.client.id %></code></p>
+  </div>
+  <div style="display:flex;gap:8px">
+    <form method="POST" action="/admin/manage/clients/<%= it.client.id %>/toggle-active" class="inline">
+      <input type="hidden" name="returnTo" value="/admin/manage/clients/<%= it.client.id %>" />
+      <button type="submit" class="btn btn-ghost"><%= it.client.active ? 'Desativar' : 'Ativar' %></button>
+    </form>
+    <% if (it.client.id !== it.currentClientId) { %>
+      <form method="POST" action="/admin/manage/clients/<%= it.client.id %>/delete" class="inline"
+            onsubmit="return confirm('APAGAR DEFINITIVAMENTE a conta &quot;<%= it.client.name %>&quot; e TODOS os dados (instâncias, mensagens, usuários)? Esta ação é irreversível.')">
+        <button type="submit" class="btn btn-danger">Apagar conta</button>
+      </form>
+    <% } %>
+  </div>
+</div>
+
+<% if (it.ok) { %>
+  <div class="alert alert-ok"><%= it.ok %></div>
+<% } %>
+<% if (it.err) { %>
+  <div class="alert alert-error"><%= it.err %></div>
+<% } %>
+
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-num"><%= it.instances.length %> / <%= it.client.maxInstances %></div>
+    <div class="stat-label">Instâncias (uso / quota)</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num"><%= it.users.length %></div>
+    <div class="stat-label">Usuários</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num"><%= it.client.totalSent %></div>
+    <div class="stat-label">Mensagens enviadas</div>
+  </div>
+</div>
+
+<!-- ── Editar conta ─────────────────────────────────────────── -->
+<div class="card">
+  <h2>Dados da conta</h2>
+  <form method="POST" action="/admin/manage/clients/<%= it.client.id %>/edit" class="form">
+    <label class="field">
+      <span>Nome da conta *</span>
+      <input type="text" name="name" value="<%= it.client.name %>" required />
+    </label>
+    <label class="field">
+      <span>Tipo</span>
+      <select name="role">
+        <option value="CLIENT" <%= it.client.role === 'CLIENT' ? 'selected' : '' %>>CLIENT</option>
+        <option value="ADMIN" <%= it.client.role === 'ADMIN' ? 'selected' : '' %>>ADMIN</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Limite de envios (rate limit)</span>
+      <input type="number" name="rateLimit" value="<%= it.client.rateLimit %>" min="1" />
+    </label>
+    <label class="field">
+      <span>Quota de instâncias (máx.)</span>
+      <input type="number" name="maxInstances" value="<%= it.client.maxInstances %>" min="1" />
+    </label>
+    <label class="field">
+      <span>Limite por destinatário/hora (0 = ilimitado)</span>
+      <input type="number" name="maxPerRecipientPerHour" value="<%= it.client.maxPerRecipientPerHour %>" min="0" />
+    </label>
+    <label class="field-check">
+      <input type="checkbox" name="fallbackEnabled" <%= it.client.fallbackEnabled ? 'checked' : '' %> />
+      <span>Habilitar fallback entre providers</span>
+    </label>
+    <label class="field-check">
+      <input type="checkbox" name="active" <%= it.client.active ? 'checked' : '' %> />
+      <span>Conta ativa</span>
+    </label>
+    <button type="submit" class="btn btn-primary">Salvar alterações</button>
+  </form>
+</div>
+
+<!-- ── Instâncias da conta ──────────────────────────────────── -->
+<div class="card">
+  <h2>Instâncias (<%= it.instances.length %>)</h2>
+  <% if (it.instances.length === 0) { %>
+    <p class="muted">Nenhuma instância criada nesta conta ainda.</p>
+  <% } else { %>
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>Nome / slug</th>
+        <th>Provider</th>
+        <th>Conexão</th>
+        <th>Enviadas hoje</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% it.instances.forEach(function(i){ %>
+        <tr>
+          <td><%= i.name || '—' %><br/><code class="muted"><%= i.slug || i.id %></code></td>
+          <td><%= i.provider %></td>
+          <td><span class="badge badge-<%= i.connection %>"><%= i.connection %></span></td>
+          <td><%= i.sentToday %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  <p class="muted" style="margin-top:8px;font-size:12.5px">
+    Visão somente leitura. Para conectar/gerenciar números, entre na conta como o próprio owner dela.
+  </p>
+  <% } %>
+</div>
+
+<!-- ── Usuários da conta ────────────────────────────────────── -->
+<div class="card">
+  <h2>Usuários (<%= it.users.length %>)</h2>
+  <table class="instances-table">
+    <thead>
+      <tr>
+        <th>E-mail</th>
+        <th>Nome</th>
+        <th>Papel</th>
+        <th>Criado em</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (it.users.length === 0) { %>
+        <tr><td colspan="5" class="muted center">Nenhum usuário nesta conta ainda.</td></tr>
+      <% } %>
+      <% it.users.forEach(function(u){ %>
+        <tr>
+          <td><%= u.email %></td>
+          <td>
+            <input form="edit-user-<%= u.id %>" type="text" name="name" value="<%= u.name || '' %>" placeholder="Nome" style="width:120px" />
+          </td>
+          <td>
+            <select form="edit-user-<%= u.id %>" name="role" style="width:150px">
+              <option value="OWNER" <%= u.role === 'OWNER' ? 'selected' : '' %>>Admin (gerencia a conta)</option>
+              <option value="MEMBER" <%= u.role === 'MEMBER' ? 'selected' : '' %>>Usuário (membro)</option>
+              <option value="SUPER_ADMIN" <%= u.role === 'SUPER_ADMIN' ? 'selected' : '' %>>Super Admin</option>
+            </select>
+          </td>
+          <td><%= new Date(u.createdAt).toLocaleString('pt-BR') %></td>
+          <td style="display:flex;gap:4px">
+            <button form="edit-user-<%= u.id %>" type="submit" class="btn btn-ghost btn-sm">Salvar</button>
+            <% if (u.id === it.currentUserId) { %>
+              <span class="muted">você</span>
+            <% } else { %>
+              <form method="POST" action="/admin/manage/users/<%= u.id %>/delete" class="inline"
+                    onsubmit="return confirm('Remover o usuário <%= u.email %>?')">
+                <input type="hidden" name="returnTo" value="/admin/manage/clients/<%= it.client.id %>" />
+                <button type="submit" class="btn btn-ghost btn-sm btn-danger">Remover</button>
+              </form>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+  <!-- Forms de edição por linha, declarados FORA da tabela (um <form> não pode
+       ficar solto dentro de <tbody>/<tr> — o parser HTML faz "foster parenting"
+       e quebra a tabela). Cada campo/botão da linha correspondente referencia
+       este form pelo atributo form="edit-user-{id}" (técnica padrão HTML5). -->
+  <% it.users.forEach(function(u){ %>
+    <form id="edit-user-<%= u.id %>" method="POST" action="/admin/manage/users/<%= u.id %>/edit"></form>
+  <% }) %>
+
+  <p class="muted section-label">Adicionar usuário a esta conta</p>
+  <form method="POST" action="/admin/manage/users" class="form" style="max-width:420px">
+    <input type="hidden" name="apiClientId" value="<%= it.client.id %>" />
+    <input type="hidden" name="origin" value="client-detail" />
+    <label class="field">
+      <span>E-mail *</span>
+      <input type="email" name="email" placeholder="usuario@empresa.com" required />
+    </label>
+    <label class="field">
+      <span>Senha (mín. 8) *</span>
+      <input type="password" name="password" minlength="8" required autocomplete="new-password" />
+    </label>
+    <label class="field">
+      <span>Nome</span>
+      <input type="text" name="name" placeholder="Nome completo" />
+    </label>
+    <label class="field">
+      <span>Papel</span>
+      <select name="role">
+        <option value="OWNER">Admin (gerencia a conta)</option>
+        <option value="MEMBER">Usuário (membro)</option>
+        <option value="SUPER_ADMIN">Super Admin (plataforma)</option>
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary">Adicionar usuário</button>
+  </form>
+</div>

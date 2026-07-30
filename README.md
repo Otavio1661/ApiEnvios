@@ -11,13 +11,16 @@ Conta (ApiClient / tenant)
   ├── Usuários (OWNER / MEMBER)         ── login JWT (painel/API)
   └── Instâncias                        ── 1 "instância" = um POOL de números
         └── Números (InstanceNumber)    ── cada número = 1 sessão real de provider
-              ├── 1️⃣ Evolution API   (principal)
-              ├── 2️⃣ WAHA            (fallback grátis)        ← opt-in por conta
+              ├── 1️⃣ Evolution API   (texto/mídia, principal)
+              ├── 2️⃣ WuzAPI          (texto/mídia + botões, localização, contato, enquete)
               └── 3️⃣ WhatsApp Cloud  (fallback oficial/pago)
 ```
 
 Você envia para a **instância** e o roteador escolhe automaticamente o melhor número
-**CONNECTED** (rodízio anti-ban). Ban detectado → número marcado `BANNED` + webhook.
+**CONNECTED** (rodízio anti-ban), priorizando um número **WuzAPI** quando o payload exige
+recurso rico (botões/localização/contato/enquete) — Evolution e Cloud API não suportam
+esses tipos e falham explicitamente (nunca degradam silenciosamente pra texto).
+Ban detectado → número marcado `BANNED` + webhook.
 
 Stack: Node 20 · TypeScript · Fastify 4 · Prisma 5 (PostgreSQL 16) · Redis 7 + BullMQ ·
 Zod · Pino · Eta + Alpine.js (painel) · Vitest · Docker Compose.
@@ -46,7 +49,6 @@ Há três formas de autenticar e três papéis humanos:
 | Gerenciar membros (`/v1/account/users`) | ❌ | ✅ (só MEMBER) | ✅ |
 | Webhooks da conta | — | ✅ | ✅ |
 | Admin: contas/usuários/instâncias globais (`/v1/admin/*`) | ❌ | ❌ | ✅ |
-| Provider WAHA (teste) | ❌ | ❌ | ✅ |
 
 > A doc **dentro do painel** (`/admin/docs`) já mostra só as seções do papel logado.
 
@@ -59,8 +61,8 @@ git clone git@github.com:Otavio1661/ApiEnvios.git && cd ApiEnvios
 npm install
 cp .env.example .env          # configure DATABASE_URL, REDIS_*, EVOLUTION_*, JWT_SECRET, API_SECRET
 
-# Infra (Postgres, Redis, Evolution, WAHA)
-docker compose up -d postgres redis evolution_api waha
+# Infra (Postgres, Redis, Evolution, WuzAPI)
+docker compose up -d postgres redis evolution_api wuzapi
 
 npx prisma migrate deploy && npx prisma generate
 npm run db:seed               # cria o ApiClient ADMIN inicial (ver ADMIN_SEED_* no .env)
@@ -77,7 +79,10 @@ Login JWT (cookie httpOnly). Telas por papel:
 - **Instâncias** (dashboard) — status **derivado do pool** + apagar instância.
 - **Docs** — referência da API, já filtrada pelo papel.
 - **Time** (OWNER) — cria/edita/remove membros + atribui dono de instância.
-- **Gestão** (super admin) — contas (teto anti-flood, quota, ativar/desativar, apagar cascata), usuários e instâncias globais.
+- **Gestão** (super admin) — duas abas: **Contas** (lista + detalhe por conta, com edição
+  completa — nome, tipo, rate limit, quota, teto anti-flood, fallback, ativar/desativar,
+  apagar em cascata — e as instâncias/usuários daquela conta específica) e **Usuários**
+  (lista global, criação vinculada a qualquer conta).
 
 ---
 

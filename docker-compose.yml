@@ -46,7 +46,7 @@ services:
 
   # ── Provider 1: Evolution API ───────────────────────────────
   evolution_api:
-    image: atendai/evolution-api:latest
+    image: evoapicloud/evolution-api:latest
     container_name: apienvios_evolution
     restart: unless-stopped
     networks:

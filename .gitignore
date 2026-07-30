@@ -6,3 +6,4 @@ dist/
 *.log
 coverage/
 graphify-out/
+backups/
