@@ -12,53 +12,249 @@
   </div>
 </div>
 
-<!-- Autenticação -->
-<div class="card">
-  <h2>Autenticação</h2>
-  <table class="instances-table">
-    <thead><tr><th>Modo</th><th>Header</th><th>Quando usar</th></tr></thead>
-    <tbody>
-      <tr>
-        <td><strong>Token de instância</strong></td>
-        <td><code>Token: &lt;token&gt;</code></td>
-        <td>Recomendado para apps cliente. Envia direto por uma instância específica.</td>
-      </tr>
-      <tr>
-        <td><strong>API key da conta</strong></td>
-        <td><code>x-api-key: &lt;chave&gt;</code></td>
-        <td>Gestão/multi-instância. Permite escolher a instância no corpo (<code>instanceId</code>).</td>
-      </tr>
-    </tbody>
-  </table>
-  <p class="muted" style="margin-top:12px">
-    Base da API: <code><%= it.apiBase %></code> ·
-    Sua API key: <code><%= it.apiKey %></code> ·
-    Token da instância de exemplo: <code><%= it.sample.token %></code>
-  </p>
-</div>
+<div class="docs-shell" x-data="{
+  busca: '',
+  atual: '',
+  bate(texto) {
+    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return this.busca === '' || norm(texto).includes(norm(this.busca));
+  },
+  ativo(id) {
+    return this.atual === id ? 'doc-atual' : '';
+  }
+}" x-init="$nextTick(() => {
+  const alvos = [...$el.querySelectorAll('.docs-content [id]')];
+  const io = new IntersectionObserver((entradas) => {
+    entradas.forEach(e => { if (e.isIntersecting) atual = e.target.id; });
+  }, { rootMargin: '-15% 0px -75% 0px', threshold: 0 });
+  alvos.forEach(el => io.observe(el));
+})">
+  <nav class="docs-nav">
+    <p class="docs-nav-title">Nesta página</p>
+    <input type="search" class="docs-busca" x-model="busca" placeholder="Buscar na documentação...">
 
-<!-- Enviar texto (abas de linguagem) -->
-<div class="card" x-data="{ t: 'curl' }">
-  <h2>Enviar mensagem de texto</h2>
-  <p class="muted"><code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat</code> → resposta <code>202 { id, status: "QUEUED" }</code></p>
+    <ul class="docs-nav-list">
+      <li><a href="#auth" :class="ativo('auth')" x-show="bate('Autenticação token de instância api key jwt')">Autenticação</a></li>
 
-  <div class="tabs">
-    <button type="button" class="tab" :class="t==='curl' && 'active'" @click="t='curl'">cURL</button>
-    <button type="button" class="tab" :class="t==='js' && 'active'" @click="t='js'">JavaScript</button>
-    <button type="button" class="tab" :class="t==='php' && 'active'" @click="t='php'">PHP</button>
-  </div>
+      <li>
+        <a href="#provisionar" :class="ativo('provisionar')" x-show="bate('Provisionar uma instância conectar número qr code integração externa')">Provisionar instância (QR Code)</a>
+        <ul>
+          <li><a href="#provisionar-criar" :class="ativo('provisionar-criar')" x-show="bate('Criar a instância')">Criar a instância</a></li>
+          <li><a href="#provisionar-numero" :class="ativo('provisionar-numero')" x-show="bate('Adicionar um número ao pool')">Adicionar número ao pool</a></li>
+          <li><a href="#provisionar-conectar" :class="ativo('provisionar-conectar')" x-show="bate('Conectar gera o qr code')">Conectar (QR Code)</a></li>
+          <li><a href="#provisionar-status" :class="ativo('provisionar-status')" x-show="bate('Verificar se já conectou polling status')">Verificar conexão</a></li>
+          <li><a href="#provisionar-remover" :class="ativo('provisionar-remover')" x-show="bate('Remover um número')">Remover um número</a></li>
+        </ul>
+      </li>
 
-  <div x-show="t==='curl'" class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat" \
+      <li><a href="#texto" :class="ativo('texto')" x-show="bate('Enviar mensagem de texto curl javascript php')">Enviar mensagem</a></li>
+      <li><a href="#midia" :class="ativo('midia')" x-show="bate('Enviar mídia imagem vídeo áudio documento sticker')">Enviar mídia</a></li>
+
+      <li>
+        <a href="#wuzapi" :class="ativo('wuzapi')" x-show="bate('Funções exclusivas do WuzAPI botões localização contato enquete figurinha ações')">Funções do WuzAPI</a>
+        <ul>
+          <li><a href="#wuzapi-botoes" :class="ativo('wuzapi-botoes')" x-show="bate('Botões interativos quickreply url call')">Botões interativos</a></li>
+          <li><a href="#wuzapi-localizacao" :class="ativo('wuzapi-localizacao')" x-show="bate('Localização latitude longitude')">Localização</a></li>
+          <li><a href="#wuzapi-contato" :class="ativo('wuzapi-contato')" x-show="bate('Contato vCard')">Contato (vCard)</a></li>
+          <li><a href="#wuzapi-enquete" :class="ativo('wuzapi-enquete')" x-show="bate('Enquete poll votação')">Enquete</a></li>
+          <li><a href="#wuzapi-figurinha" :class="ativo('wuzapi-figurinha')" x-show="bate('Figurinha sticker')">Figurinha</a></li>
+          <li><a href="#wuzapi-acoes" :class="ativo('wuzapi-acoes')" x-show="bate('Ações de conversa digitando reagir ler verificar número')">Ações de conversa</a></li>
+        </ul>
+      </li>
+
+      <li><a href="#alternativa" :class="ativo('alternativa')" x-show="bate('Alternativa enviar pela API key da conta')">Enviar pela API key</a></li>
+      <li><a href="#status" :class="ativo('status')" x-show="bate('Consultar status de uma mensagem')">Status da mensagem</a></li>
+      <li><a href="#campanhas" :class="ativo('campanhas')" x-show="bate('Campanhas envio em lote')">Campanhas em lote</a></li>
+      <li><a href="#metricas" :class="ativo('metricas')" x-show="bate('Métricas de uso anti-flood')">Métricas de uso</a></li>
+
+      <% if (it.isOwner) { %>
+      <li>
+        <a href="#dono" :class="ativo('dono')" x-show="bate('Gestão da conta dono')">Gestão da conta (dono)</a>
+        <ul>
+          <li><a href="#dono-membros" :class="ativo('dono-membros')" x-show="bate('Gerenciar membros do time')">Membros do time</a></li>
+          <li><a href="#dono-instancia" :class="ativo('dono-instancia')" x-show="bate('Atribuir dono de instância')">Dono da instância</a></li>
+          <li><a href="#dono-webhooks" :class="ativo('dono-webhooks')" x-show="bate('Webhooks eventos verificação HMAC')">Webhooks</a></li>
+        </ul>
+      </li>
+      <% } %>
+
+      <% if (it.isSuperAdmin) { %>
+      <li>
+        <a href="#superadmin" :class="ativo('superadmin')" x-show="bate('Administração da plataforma super admin')">Administração (super admin)</a>
+        <ul>
+          <li><a href="#superadmin-contas" :class="ativo('superadmin-contas')" x-show="bate('Contas tenants')">Contas (tenants)</a></li>
+          <li><a href="#superadmin-usuarios" :class="ativo('superadmin-usuarios')" x-show="bate('Usuários e instâncias global')">Usuários e instâncias</a></li>
+        </ul>
+      </li>
+      <% } %>
+
+      <li><a href="#insomnia" :class="ativo('insomnia')" x-show="bate('Insomnia Postman importar curl')">Insomnia / Postman</a></li>
+    </ul>
+  </nav>
+
+  <div class="docs-content">
+
+    <!-- Autenticação -->
+    <div class="card" id="auth" x-show="bate($el.textContent)">
+      <h2>Autenticação</h2>
+      <table class="instances-table">
+        <thead><tr><th>Modo</th><th>Header</th><th>Quando usar</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Token de instância</strong></td>
+            <td><code>Token: &lt;token&gt;</code></td>
+            <td>Recomendado para apps cliente. Envia direto por uma instância específica.</td>
+          </tr>
+          <tr>
+            <td><strong>API key da conta</strong></td>
+            <td><code>x-api-key: &lt;chave&gt;</code></td>
+            <td>Gestão/multi-instância. Permite escolher a instância no corpo (<code>instanceId</code>).</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:12px">
+        Base da API: <code><%= it.apiBase %></code> ·
+        Sua API key: <code><%= it.apiKey %></code> ·
+        Token da instância de exemplo: <code><%= it.sample.token %></code>
+      </p>
+    </div>
+
+    <!-- Provisionar instância + conectar número via QR (integração externa) -->
+    <div class="card" id="provisionar" x-show="bate($el.textContent)">
+      <h2>Provisionar uma instância e conectar um número (QR Code)</h2>
+      <p class="muted">
+        Fluxo pra quando <strong>outro sistema seu</strong> precisa criar a própria instância,
+        adicionar um número ao pool e conectar via QR Code programaticamente — é exatamente o
+        que a tela <a href="/admin">Instâncias</a> deste painel faz por trás, e o mesmo padrão
+        usado por integrações como a <strong>Gestão Alvará</strong> (cada tenant deles ganha a
+        própria instância dentro da conta).
+      </p>
+
+      <div class="callout">
+        <span class="callout-icon">⚠️</span>
+        <div>
+          O envio é roteado pelo <strong>pool de números</strong> (<code>InstanceNumber</code>),
+          não pela instância em si. Criar só a instância e nunca adicionar um número resulta
+          numa instância que nunca envia nada (erro <code>"Nenhum número disponível no pool"</code>).
+          Sempre faça os passos 1 e 2 juntos.
+        </div>
+      </div>
+
+      <p class="muted" style="margin-top:12px">
+        Todos os passos usam a <strong>API key da conta</strong>
+        (<code>x-api-key: <%= it.apiKey %></code>) — é ela que tem permissão de criar/gerenciar
+        recursos. O <em>token</em> que a instância devolve no passo 1 serve só pra ENVIAR
+        mensagem depois (mesmo header <code>Token:</code> usado no resto desta página), nunca
+        pra provisionar.
+      </p>
+
+      <h3 id="provisionar-criar" style="margin-top:20px">1. Criar a instância</h3>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instances" \
+  -H "x-api-key: <%= it.apiKey %>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Minha Loja","slug":"minha-loja","provider":"WUZAPI"}'
+# 201 { "id": "INSTANCE_ID", "token": "...", "slug": "minha-loja", ... }</code></pre>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        <code>slug</code> é opcional mas vale usar um valor único e determinístico (ex.:
+        <code>meu-sistema-tenant-42</code>) — se a sua chamada cair DEPOIS de a instância já ter
+        sido criada do lado da ApiEnvios, um <code>GET <%= it.apiBase %>/v1/instances/minha-loja</code>
+        recupera a mesma instância pelo slug em vez de criar uma duplicada (erro
+        <code>409 SLUG_TAKEN</code> nesse caso — trate como "já existe, busque por slug").
+        <code>provider</code> aceita <code>EVOLUTION</code>, <code>WUZAPI</code> ou
+        <code>CLOUD_API</code> — escolha <code>WUZAPI</code> se algum número desta instância for
+        usar botões/localização/contato/enquete.
+      </p>
+
+      <h3 id="provisionar-numero" style="margin-top:20px">2. Adicionar um número ao pool</h3>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instances/INSTANCE_ID/numbers" \
+  -H "x-api-key: <%= it.apiKey %>" \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"WUZAPI","label":"Principal"}'
+# 201 { "id": "NUMBER_ID", "connectionState": "DISCONNECTED", ... }</code></pre>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        Repita este passo pra adicionar mais números na mesma instância — é isso que dá
+        <strong>redundância</strong>: se um número cair/for banido, o roteador tenta
+        automaticamente outro conectado, sem você precisar fazer nada. Cada número pode usar um
+        provider diferente dos demais (ex.: 1 Evolution + 1 WuzAPI na mesma instância).
+      </p>
+
+      <h3 id="provisionar-conectar" style="margin-top:20px">3. Conectar (gera o QR Code)</h3>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instances/INSTANCE_ID/numbers/NUMBER_ID/connect" \
+  -H "x-api-key: <%= it.apiKey %>"
+# { "qrCode": "iVBORw0KG...", "qrExpiresAt": "2026-08-01T12:00:00.000Z", "connectionState": "QR_PENDING" }</code></pre>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        <code>qrCode</code> vem em base64 puro OU já como data URI, dependendo do provider —
+        trate os dois casos ao exibir a imagem:
+      </p>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>const src = qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`;
+// <img src={src} alt="QR Code" /></code></pre>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        Peça pro dono do número abrir o WhatsApp → <strong>Aparelhos conectados</strong> →
+        <strong>Conectar um aparelho</strong> → apontar a câmera pro QR. Expira em poucos
+        minutos (<code>qrExpiresAt</code>) — gere um novo repetindo este mesmo <code>POST</code>.
+      </p>
+
+      <h3 id="provisionar-status" style="margin-top:20px">4. Verificar se já conectou (polling)</h3>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code># Fonte de verdade — força sincronizar com o provider
+curl "<%= it.apiBase %>/v1/instances/INSTANCE_ID/numbers/NUMBER_ID/status" -H "x-api-key: <%= it.apiKey %>"
+# { "connectionState": "CONNECTED" }
+
+# Mesma info + o QR em cache (útil se ainda estiver QR_PENDING)
+curl "<%= it.apiBase %>/v1/instances/INSTANCE_ID/numbers/NUMBER_ID/qr" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        Consulte <code>/status</code> em intervalos curtos (ex.: a cada 4s, por até uns 5
+        minutos) enquanto <code>connectionState</code> não virar <code>CONNECTED</code>. Assim
+        que conectar, o número já está pronto pra receber envios normalmente.
+      </p>
+
+      <h3 id="provisionar-remover" style="margin-top:20px">5. Remover um número</h3>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X DELETE "<%= it.apiBase %>/v1/instances/INSTANCE_ID/numbers/NUMBER_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        Não existe "desconectar mantendo o número" — a única forma de desconectar é remover o
+        recurso; reconectar depois sempre gera um QR novo (libera 1 slot pra adicionar outro).
+      </p>
+    </div>
+
+    <!-- Enviar texto (abas de linguagem) -->
+    <div class="card" id="texto" x-data="{ t: 'curl' }" x-show="bate($el.textContent)">
+      <h2>Enviar mensagem de texto</h2>
+      <p class="muted"><code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat</code> → resposta <code>202 { id, status: "QUEUED" }</code></p>
+
+      <div class="tabs">
+        <button type="button" class="tab" :class="t==='curl' && 'active'" @click="t='curl'">cURL</button>
+        <button type="button" class="tab" :class="t==='js' && 'active'" @click="t='js'">JavaScript</button>
+        <button type="button" class="tab" :class="t==='php' && 'active'" @click="t='php'">PHP</button>
+      </div>
+
+      <div x-show="t==='curl'" class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat" \
   -H "Token: <%= it.sample.token %>" \
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","body":"Olá! Mensagem de teste."}'</code></pre>
-  </div>
+      </div>
 
-  <div x-show="t==='js'" x-cloak class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>const res = await fetch("<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat", {
+      <div x-show="t==='js'" x-cloak class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>const res = await fetch("<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat", {
   method: "POST",
   headers: {
     "Token": "<%= it.sample.token %>",
@@ -68,11 +264,11 @@
 });
 const data = await res.json();
 console.log(data); // { id, status: "QUEUED" }</code></pre>
-  </div>
+      </div>
 
-  <div x-show="t==='php'" x-cloak class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>&lt;?php
+      <div x-show="t==='php'" x-cloak class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>&lt;?php
 $ch = curl_init("<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/chat");
 curl_setopt_array($ch, [
   CURLOPT_RETURNTRANSFER =&gt; true,
@@ -89,52 +285,53 @@ curl_setopt_array($ch, [
 $response = curl_exec($ch);
 curl_close($ch);
 echo $response; // {"id":"...","status":"QUEUED"}</code></pre>
-  </div>
-</div>
+      </div>
+    </div>
 
-<!-- Enviar mídia -->
-<div class="card">
-  <h2>Enviar mídia (imagem, vídeo, áudio, documento)</h2>
-  <p class="muted"><code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media</code></p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media" \
+    <!-- Enviar mídia -->
+    <div class="card" id="midia" x-show="bate($el.textContent)">
+      <h2>Enviar mídia (imagem, vídeo, áudio, documento)</h2>
+      <p class="muted"><code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media</code></p>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media" \
   -H "Token: <%= it.sample.token %>" \
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","type":"IMAGE","mediaUrl":"https://exemplo.com/foto.jpg","caption":"Legenda"}'</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px">Tipos aceitos: <code>IMAGE</code>, <code>VIDEO</code>, <code>AUDIO</code>, <code>DOCUMENT</code>, <code>STICKER</code>.</p>
-</div>
+      </div>
+      <p class="muted" style="margin-top:8px">Tipos aceitos: <code>IMAGE</code>, <code>VIDEO</code>, <code>AUDIO</code>, <code>DOCUMENT</code>, <code>STICKER</code>.</p>
+    </div>
 
-<!-- ════ Funções exclusivas do WuzAPI ════ -->
-<hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
-<h2>Funções exclusivas do WuzAPI</h2>
-<p class="muted">O provider <strong>WuzAPI</strong> fala direto com o WhatsApp (biblioteca whatsmeow) e por isso expõe recursos que Evolution e Cloud API não têm: botões, localização, contato, enquete e ações de conversa (digitando, reagir, confirmar leitura, verificar número).</p>
+    <!-- ════ Funções exclusivas do WuzAPI ════ -->
+    <section id="wuzapi" x-show="bate($el.textContent)">
+      <hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
+      <h2>Funções exclusivas do WuzAPI</h2>
+      <p class="muted">O provider <strong>WuzAPI</strong> fala direto com o WhatsApp (biblioteca whatsmeow) e por isso expõe recursos que Evolution e Cloud API não têm: botões, localização, contato, enquete e ações de conversa (digitando, reagir, confirmar leitura, verificar número).</p>
 
-<div class="callout">
-  <span class="callout-icon">🔘</span>
-  <div>
-    <strong>Crie uma instância com provider WuzAPI</strong> no painel pra usar qualquer coisa desta seção. Envios (botões/localização/contato/enquete/figurinha) usam o endpoint completo <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send</code> — se a instância não for WuzAPI, a resposta falha explicitamente com um <code>errorCode</code> específico (ex.: <code>BUTTONS_UNSUPPORTED</code>), nunca degrada silenciosamente pra texto. Ações (digitando/reagir/ler/verificar) são chamadas imediatas em <code>/v1/instance/<%= it.sample.id %>/actions/*</code>, sem passar pela fila.
-  </div>
-</div>
+      <div class="callout">
+        <span class="callout-icon">🔘</span>
+        <div>
+          <strong>Crie uma instância com provider WuzAPI</strong> no painel pra usar qualquer coisa desta seção. Envios (botões/localização/contato/enquete/figurinha) usam o endpoint completo <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send</code> — se a instância não for WuzAPI, a resposta falha explicitamente com um <code>errorCode</code> específico (ex.: <code>BUTTONS_UNSUPPORTED</code>), nunca degrada silenciosamente pra texto. Ações (digitando/reagir/ler/verificar) são chamadas imediatas em <code>/v1/instance/<%= it.sample.id %>/actions/*</code>, sem passar pela fila.
+        </div>
+      </div>
 
-<!-- Botões interativos -->
-<div class="card">
-  <h3>Botões interativos</h3>
-  <p class="muted"><code>type: "BUTTONS"</code> — o WhatsApp exibe botões de resposta rápida, link ou ligação abaixo da mensagem.</p>
+      <!-- Botões interativos -->
+      <div class="card" id="wuzapi-botoes">
+        <h3>Botões interativos</h3>
+        <p class="muted"><code>type: "BUTTONS"</code> — o WhatsApp exibe botões de resposta rápida, link ou ligação abaixo da mensagem.</p>
 
-  <table class="instances-table" style="margin:12px 0">
-    <thead><tr><th>Tipo de botão</th><th>Campos</th><th>Limite</th></tr></thead>
-    <tbody>
-      <tr><td><code>quickreply</code></td><td><code>displayText</code></td><td>Até 3 por mensagem · texto até 25 caracteres</td></tr>
-      <tr><td><code>url</code></td><td><code>displayText</code>, <code>url</code></td><td>No máximo 1 por mensagem · abre o link</td></tr>
-      <tr><td><code>call</code></td><td><code>displayText</code>, <code>phoneNumber</code></td><td>No máximo 1 por mensagem · liga para o número</td></tr>
-    </tbody>
-  </table>
+        <table class="instances-table" style="margin:12px 0">
+          <thead><tr><th>Tipo de botão</th><th>Campos</th><th>Limite</th></tr></thead>
+          <tbody>
+            <tr><td><code>quickreply</code></td><td><code>displayText</code></td><td>Até 3 por mensagem · texto até 25 caracteres</td></tr>
+            <tr><td><code>url</code></td><td><code>displayText</code>, <code>url</code></td><td>No máximo 1 por mensagem · abre o link</td></tr>
+            <tr><td><code>call</code></td><td><code>displayText</code>, <code>phoneNumber</code></td><td>No máximo 1 por mensagem · liga para o número</td></tr>
+          </tbody>
+        </table>
 
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
   -H "Token: <%= it.sample.token %>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -148,171 +345,171 @@ echo $response; // {"id":"...","status":"QUEUED"}</code></pre>
       { "type": "url", "displayText": "Ver detalhes", "url": "https://exemplo.com/pedido/123" }
     ]
   }'</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px"><code>text</code> obrigatório (corpo) · <code>footer</code> opcional (até 60 caracteres) · <code>buttons</code>: 1 a 5 itens, no máximo 3 <code>quickreply</code> + 1 <code>url</code> + 1 <code>call</code>.</p>
-</div>
+        </div>
+        <p class="muted" style="margin-top:8px"><code>text</code> obrigatório (corpo) · <code>footer</code> opcional (até 60 caracteres) · <code>buttons</code>: 1 a 5 itens, no máximo 3 <code>quickreply</code> + 1 <code>url</code> + 1 <code>call</code>.</p>
+      </div>
 
-<!-- Localização -->
-<div class="card">
-  <h3>Localização</h3>
-  <p class="muted"><code>type: "LOCATION"</code> — envia um pin de mapa com coordenadas e rótulo opcional.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+      <!-- Localização -->
+      <div class="card" id="wuzapi-localizacao">
+        <h3>Localização</h3>
+        <p class="muted"><code>type: "LOCATION"</code> — envia um pin de mapa com coordenadas e rótulo opcional.</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
   -H "Token: <%= it.sample.token %>" \
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","type":"LOCATION","latitude":-23.5505,"longitude":-46.6333,"locationName":"Nossa loja"}'</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px"><code>latitude</code> e <code>longitude</code> obrigatórios · <code>locationName</code> opcional (rótulo exibido abaixo do pin).</p>
-</div>
+        </div>
+        <p class="muted" style="margin-top:8px"><code>latitude</code> e <code>longitude</code> obrigatórios · <code>locationName</code> opcional (rótulo exibido abaixo do pin).</p>
+      </div>
 
-<!-- Contato (vCard) -->
-<div class="card">
-  <h3>Contato (vCard)</h3>
-  <p class="muted"><code>type: "CONTACT"</code> — envia um cartão de contato que o destinatário pode salvar direto na agenda.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+      <!-- Contato (vCard) -->
+      <div class="card" id="wuzapi-contato">
+        <h3>Contato (vCard)</h3>
+        <p class="muted"><code>type: "CONTACT"</code> — envia um cartão de contato que o destinatário pode salvar direto na agenda.</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
   -H "Token: <%= it.sample.token %>" \
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","type":"CONTACT","contactName":"Suporte Loja X","contactPhone":"5544988880000"}'</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px"><code>contactName</code> e <code>contactPhone</code> obrigatórios — o vCard (VERSION 3.0) é montado automaticamente.</p>
-</div>
+        </div>
+        <p class="muted" style="margin-top:8px"><code>contactName</code> e <code>contactPhone</code> obrigatórios — o vCard (VERSION 3.0) é montado automaticamente.</p>
+      </div>
 
-<!-- Enquete -->
-<div class="card">
-  <h3>Enquete</h3>
-  <p class="muted"><code>type: "POLL"</code> — pergunta com opções de resposta, votação nativa do WhatsApp.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
+      <!-- Enquete -->
+      <div class="card" id="wuzapi-enquete">
+        <h3>Enquete</h3>
+        <p class="muted"><code>type: "POLL"</code> — pergunta com opções de resposta, votação nativa do WhatsApp.</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/send" \
   -H "Token: <%= it.sample.token %>" \
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","type":"POLL","text":"Qual sua cor favorita?","pollOptions":["Azul","Verde","Vermelho"]}'</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px"><code>text</code> é a pergunta · <code>pollOptions</code> aceita de 2 a 12 opções.</p>
-</div>
+        </div>
+        <p class="muted" style="margin-top:8px"><code>text</code> é a pergunta · <code>pollOptions</code> aceita de 2 a 12 opções.</p>
+      </div>
 
-<!-- Figurinha -->
-<div class="card">
-  <h3>Figurinha (sticker)</h3>
-  <p class="muted"><code>type: "STICKER"</code> — mesmo formato de "Enviar mídia" acima (<code>mediaUrl</code>), com o WuzAPI convertendo automaticamente para o formato de figurinha do WhatsApp.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media" \
+      <!-- Figurinha -->
+      <div class="card" id="wuzapi-figurinha">
+        <h3>Figurinha (sticker)</h3>
+        <p class="muted"><code>type: "STICKER"</code> — mesmo formato de "Enviar mídia" acima (<code>mediaUrl</code>), com o WuzAPI convertendo automaticamente para o formato de figurinha do WhatsApp.</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/messages/media" \
   -H "Token: <%= it.sample.token %>" \
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","type":"STICKER","mediaUrl":"https://exemplo.com/figurinha.webp"}'</code></pre>
-  </div>
-</div>
+        </div>
+      </div>
 
-<!-- Ações (não geram mensagem, chamada imediata) -->
-<div class="card">
-  <h3>Ações de conversa</h3>
-  <p class="muted">Diferente dos envios acima, ações NÃO entram na fila nem geram uma <code>Message</code> — são chamadas imediatas ao WhatsApp. Resposta <code>200 {ok:true}</code> em caso de sucesso.</p>
+      <!-- Ações (não geram mensagem, chamada imediata) -->
+      <div class="card" id="wuzapi-acoes">
+        <h3>Ações de conversa</h3>
+        <p class="muted">Diferente dos envios acima, ações NÃO entram na fila nem geram uma <code>Message</code> — são chamadas imediatas ao WhatsApp. Resposta <code>200 {ok:true}</code> em caso de sucesso.</p>
 
-  <p class="muted" style="margin-top:12px"><strong>Indicador "digitando…"/"gravando áudio…"</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/presence</code></p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/presence" \
+        <p class="muted" style="margin-top:12px"><strong>Indicador "digitando…"/"gravando áudio…"</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/presence</code></p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/presence" \
   -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","state":"typing"}'  # typing | recording | paused</code></pre>
-  </div>
+        </div>
 
-  <p class="muted" style="margin-top:16px"><strong>Reagir com emoji a uma mensagem</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/react</code></p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/react" \
+        <p class="muted" style="margin-top:16px"><strong>Reagir com emoji a uma mensagem</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/react</code></p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/react" \
   -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","messageId":"ID_DA_MENSAGEM","emoji":"👍"}'  # emoji vazio/omitido remove a reação</code></pre>
-  </div>
+        </div>
 
-  <p class="muted" style="margin-top:16px"><strong>Marcar mensagens como lidas</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/read</code></p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/read" \
+        <p class="muted" style="margin-top:16px"><strong>Marcar mensagens como lidas</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/read</code></p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/read" \
   -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","messageIds":["ID_DA_MENSAGEM_1","ID_DA_MENSAGEM_2"]}'</code></pre>
-  </div>
+        </div>
 
-  <p class="muted" style="margin-top:16px"><strong>Verificar se números têm WhatsApp ativo</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/check-number</code></p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/check-number" \
+        <p class="muted" style="margin-top:16px"><strong>Verificar se números têm WhatsApp ativo</strong> · <code>POST <%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/check-number</code></p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/instance/<%= it.sample.id %>/actions/check-number" \
   -H "Token: <%= it.sample.token %>" -H "Content-Type: application/json" \
   -d '{"phones":["5544999990000","5544988880000"]}'
 # resposta: { "results": [{ "phone": "...", "existsOnWhatsapp": true, "jid": "..." }] }</code></pre>
-  </div>
-</div>
+        </div>
+      </div>
+    </section>
 
-<!-- Alternativa: API key da conta -->
-<div class="card">
-  <h2>Alternativa — enviar pela API key da conta</h2>
-  <p class="muted"><code>POST <%= it.apiBase %>/v1/messages</code> · escolha a instância no corpo (<code>instanceId</code>) ou omita para usar a preferida.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/messages" \
+    <!-- Alternativa: API key da conta -->
+    <div class="card" id="alternativa" x-show="bate($el.textContent)">
+      <h2>Alternativa — enviar pela API key da conta</h2>
+      <p class="muted"><code>POST <%= it.apiBase %>/v1/messages</code> · escolha a instância no corpo (<code>instanceId</code>) ou omita para usar a preferida.</p>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/messages" \
   -H "x-api-key: <%= it.apiKey %>" \
   -H "Content-Type: application/json" \
   -d '{"to":"5544999990000","type":"TEXT","text":"Olá!","instanceId":"<%= it.sample.id %>"}'</code></pre>
-  </div>
-</div>
+      </div>
+    </div>
 
-<!-- Consultar status -->
-<div class="card">
-  <h2>Consultar status de uma mensagem</h2>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl "<%= it.apiBase %>/v1/messages/MENSAGEM_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px">Estados: <code>QUEUED</code> → <code>SENDING</code> → <code>SENT</code> → <code>DELIVERED</code> → <code>READ</code> (ou <code>FAILED</code>).</p>
-</div>
+    <!-- Consultar status -->
+    <div class="card" id="status" x-show="bate($el.textContent)">
+      <h2>Consultar status de uma mensagem</h2>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl "<%= it.apiBase %>/v1/messages/MENSAGEM_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+      </div>
+      <p class="muted" style="margin-top:8px">Estados: <code>QUEUED</code> → <code>SENDING</code> → <code>SENT</code> → <code>DELIVERED</code> → <code>READ</code> (ou <code>FAILED</code>).</p>
+    </div>
 
-<!-- Campanhas em lote (comum) -->
-<div class="card">
-  <h2>Campanhas — envio em lote</h2>
-  <p class="muted"><code>POST <%= it.apiBase %>/v1/campaigns</code> · envia a mesma mensagem para uma lista (até 1000 destinos). Respeita o limite por destinatário e o espaçamento anti-ban automaticamente.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/campaigns" \
+    <!-- Campanhas em lote (comum) -->
+    <div class="card" id="campanhas" x-show="bate($el.textContent)">
+      <h2>Campanhas — envio em lote</h2>
+      <p class="muted"><code>POST <%= it.apiBase %>/v1/campaigns</code> · envia a mesma mensagem para uma lista (até 1000 destinos). Respeita o limite por destinatário e o espaçamento anti-ban automaticamente.</p>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl -X POST "<%= it.apiBase %>/v1/campaigns" \
   -H "x-api-key: <%= it.apiKey %>" \
   -H "Content-Type: application/json" \
   -d '{"to":["5544999990000","5544999990001"],"text":"Promoção!","instanceId":"<%= it.sample.id %>","externalIdPrefix":"promo-jun"}'</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px">Resposta <code>202 { total, queued, rateLimited, duplicates, results[] }</code>. Use <code>externalIdPrefix</code> para idempotência (reexecutar não duplica envios).</p>
-</div>
+      </div>
+      <p class="muted" style="margin-top:8px">Resposta <code>202 { total, queued, rateLimited, duplicates, results[] }</code>. Use <code>externalIdPrefix</code> para idempotência (reexecutar não duplica envios).</p>
+    </div>
 
-<!-- Métricas (comum) -->
-<div class="card">
-  <h2>Métricas de uso</h2>
-  <p class="muted"><code>GET <%= it.apiBase %>/v1/metrics?days=30</code> · totais por status, série diária, por instância e por número. (Um usuário comum vê só as métricas das instâncias dele.)</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl "<%= it.apiBase %>/v1/metrics?days=30" -H "x-api-key: <%= it.apiKey %>"</code></pre>
-  </div>
-</div>
+    <!-- Métricas (comum) -->
+    <div class="card" id="metricas" x-show="bate($el.textContent)">
+      <h2>Métricas de uso</h2>
+      <p class="muted"><code>GET <%= it.apiBase %>/v1/metrics?days=30</code> · totais por status, série diária, por instância e por número. (Um usuário comum vê só as métricas das instâncias dele.)</p>
+      <div class="code" x-data="{ copied:false }">
+        <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+        <pre x-ref="c"><code>curl "<%= it.apiBase %>/v1/metrics?days=30" -H "x-api-key: <%= it.apiKey %>"</code></pre>
+      </div>
+      <div class="callout" style="margin-top:16px">
+        <span class="callout-icon">🛡️</span>
+        <div>
+          <strong>Proteção anti-flood:</strong> cada conta tem um teto de mensagens por hora para o <strong>mesmo número de destino</strong> (configurável pelo super admin; <code>0</code> = ilimitado). Ao estourar, a API responde <code>429</code> com <code>Retry-After</code> — sem enfileirar nem cobrar o envio.
+        </div>
+      </div>
+    </div>
 
-<!-- Limite anti-flood (comum, informativo) -->
-<div class="callout">
-  <span class="callout-icon">🛡️</span>
-  <div>
-    <strong>Proteção anti-flood:</strong> cada conta tem um teto de mensagens por hora para o <strong>mesmo número de destino</strong> (configurável pelo super admin; <code>0</code> = ilimitado). Ao estourar, a API responde <code>429</code> com <code>Retry-After</code> — sem enfileirar nem cobrar o envio.
-  </div>
-</div>
+    <% if (it.isOwner) { %>
+    <!-- ════ Seção do DONO DA CONTA (OWNER) ════ -->
+    <section id="dono" x-show="bate($el.textContent)">
+      <hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
+      <h2>Gestão da conta (dono)</h2>
+      <p class="muted">Endpoints disponíveis para o dono da conta (login de administrador da conta).</p>
 
-<% if (it.isOwner) { %>
-<!-- ════ Seção do DONO DA CONTA (OWNER) ════ -->
-<hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
-<h2>Gestão da conta (dono)</h2>
-<p class="muted">Endpoints disponíveis para o dono da conta (login de administrador da conta).</p>
-
-<div class="card">
-  <h3>Gerenciar membros do time</h3>
-  <p class="muted">O dono cria/edita/remove os <strong>usuários (membros)</strong> da própria conta. Membros enxergam apenas as instâncias atribuídas a eles.</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code># Listar membros
+      <div class="card" id="dono-membros">
+        <h3>Gerenciar membros do time</h3>
+        <p class="muted">O dono cria/edita/remove os <strong>usuários (membros)</strong> da própria conta. Membros enxergam apenas as instâncias atribuídas a eles.</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code># Listar membros
 curl "<%= it.apiBase %>/v1/account/users" -H "Authorization: Bearer SEU_JWT"
 
 # Criar membro (papel sempre MEMBER)
@@ -323,81 +520,87 @@ curl -X POST "<%= it.apiBase %>/v1/account/users" -H "Authorization: Bearer SEU_
 # Editar (nome/senha) e remover
 curl -X PATCH  "<%= it.apiBase %>/v1/account/users/USER_ID" -H "Authorization: Bearer SEU_JWT" -H "Content-Type: application/json" -d '{"name":"Novo Nome"}'
 curl -X DELETE "<%= it.apiBase %>/v1/account/users/USER_ID" -H "Authorization: Bearer SEU_JWT"</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px">Também dá para gerenciar pela tela <a href="/admin/team">Time</a>.</p>
-</div>
+        </div>
+        <p class="muted" style="margin-top:8px">Também dá para gerenciar pela tela <a href="/admin/team">Time</a>.</p>
+      </div>
 
-<div class="card">
-  <h3>Atribuir dono de instância</h3>
-  <p class="muted"><code>PATCH <%= it.apiBase %>/v1/instances/:id/owner</code> · define qual membro é dono da instância (ou <code>null</code> para nível de conta).</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>curl -X PATCH "<%= it.apiBase %>/v1/instances/<%= it.sample.id %>/owner" \
+      <div class="card" id="dono-instancia">
+        <h3>Atribuir dono de instância</h3>
+        <p class="muted"><code>PATCH <%= it.apiBase %>/v1/instances/:id/owner</code> · define qual membro é dono da instância (ou <code>null</code> para nível de conta).</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>curl -X PATCH "<%= it.apiBase %>/v1/instances/<%= it.sample.id %>/owner" \
   -H "Authorization: Bearer SEU_JWT" -H "Content-Type: application/json" \
   -d '{"ownerUserId":"USER_ID"}'</code></pre>
-  </div>
-</div>
+        </div>
+      </div>
 
-<div class="card">
-  <h3>Webhooks (eventos) + verificação HMAC</h3>
-  <p class="muted">Receba eventos (<code>BAN_DETECTED</code>, <code>NUMBER_DISCONNECTED</code>, <code>NUMBER_ROTATED</code>, <code>MESSAGE_FAILED</code>...). Com <code>secret</code>, cada entrega é assinada (retry automático + DLQ).</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code># Cadastrar webhook com segredo
+      <div class="card" id="dono-webhooks">
+        <h3>Webhooks (eventos) + verificação HMAC</h3>
+        <p class="muted">Receba eventos (<code>BAN_DETECTED</code>, <code>NUMBER_DISCONNECTED</code>, <code>NUMBER_ROTATED</code>, <code>MESSAGE_FAILED</code>...). Com <code>secret</code>, cada entrega é assinada (retry automático + DLQ).</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code># Cadastrar webhook com segredo
 curl -X POST "<%= it.apiBase %>/v1/webhooks" -H "x-api-key: <%= it.apiKey %>" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://seu-sistema.com/hook","events":["BAN_DETECTED","NUMBER_DISCONNECTED"],"secret":"UM_SEGREDO_FORTE"}'</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px">Verificação da assinatura no seu receptor (Node):</p>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code>import { createHmac } from "crypto";
+        </div>
+        <p class="muted" style="margin-top:8px">Verificação da assinatura no seu receptor (Node):</p>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code>import { createHmac } from "crypto";
 // rawBody = corpo cru da requisição (string), headers do POST do webhook
 const ts  = headers["x-apienvios-timestamp"];
 const sig = headers["x-apienvios-signature"]; // "sha256=..."
 const esperado = "sha256=" + createHmac("sha256", SECRET).update(`${ts}.${rawBody}`).digest("hex");
 const valido = sig === esperado; // rejeite se false</code></pre>
-  </div>
-</div>
-<% } %>
+        </div>
+      </div>
+    </section>
+    <% } %>
 
-<% if (it.isSuperAdmin) { %>
-<!-- ════ Seção do SUPER ADMIN (plataforma) ════ -->
-<hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
-<h2>Administração da plataforma (super admin)</h2>
-<p class="muted">Controle global de contas, usuários e instâncias.</p>
+    <% if (it.isSuperAdmin) { %>
+    <!-- ════ Seção do SUPER ADMIN (plataforma) ════ -->
+    <section id="superadmin" x-show="bate($el.textContent)">
+      <hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
+      <h2>Administração da plataforma (super admin)</h2>
+      <p class="muted">Controle global de contas, usuários e instâncias.</p>
 
-<div class="card">
-  <h3>Contas (tenants)</h3>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code># Listar / criar / editar / apagar (cascata) contas
+      <div class="card" id="superadmin-contas">
+        <h3>Contas (tenants)</h3>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code># Listar / criar / editar / apagar (cascata) contas
 curl "<%= it.apiBase %>/v1/admin/clients" -H "x-api-key: <%= it.apiKey %>"
 curl -X POST  "<%= it.apiBase %>/v1/admin/clients" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"name":"Nova Conta","role":"CLIENT","maxPerRecipientPerHour":10}'
 curl -X PATCH "<%= it.apiBase %>/v1/admin/clients/ACC_ID" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"active":false,"maxInstances":3}'
 curl -X DELETE "<%= it.apiBase %>/v1/admin/clients/ACC_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px">⚠️ <code>DELETE</code> apaga em cascata (instâncias, números, mensagens, usuários). Irreversível.</p>
-</div>
+        </div>
+        <p class="muted" style="margin-top:8px">⚠️ <code>DELETE</code> apaga em cascata (instâncias, números, mensagens, usuários). Irreversível.</p>
+      </div>
 
-<div class="card">
-  <h3>Usuários e instâncias (global)</h3>
-  <div class="code" x-data="{ copied:false }">
-    <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
-    <pre x-ref="c"><code># Usuários de qualquer conta
+      <div class="card" id="superadmin-usuarios">
+        <h3>Usuários e instâncias (global)</h3>
+        <div class="code" x-data="{ copied:false }">
+          <button type="button" class="code-copy" @click="navigator.clipboard.writeText($refs.c.innerText); copied=true; setTimeout(()=>copied=false,1500)" x-text="copied?'Copiado!':'Copiar'"></button>
+          <pre x-ref="c"><code># Usuários de qualquer conta
 curl -X POST  "<%= it.apiBase %>/v1/admin/users" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"apiClientId":"ACC_ID","email":"a@b.com","password":"senha-forte","role":"OWNER"}'
 curl -X PATCH "<%= it.apiBase %>/v1/admin/users/USER_ID" -H "x-api-key: <%= it.apiKey %>" -H "Content-Type: application/json" -d '{"role":"MEMBER"}'
 
 # Todas as instâncias da plataforma + apagar qualquer uma (cascata)
 curl "<%= it.apiBase %>/v1/admin/instances" -H "x-api-key: <%= it.apiKey %>"
 curl -X DELETE "<%= it.apiBase %>/v1/admin/instances/INST_ID" -H "x-api-key: <%= it.apiKey %>"</code></pre>
-  </div>
-  <p class="muted" style="margin-top:8px">Tudo isso também está na tela <a href="/admin/manage">Gestão</a>.</p>
-</div>
-<% } %>
+        </div>
+        <p class="muted" style="margin-top:8px">Tudo isso também está na tela <a href="/admin/manage">Gestão</a>.</p>
+      </div>
+    </section>
+    <% } %>
 
-<!-- Insomnia / Postman -->
-<div class="card">
-  <h2>Insomnia / Postman</h2>
-  <p class="muted">Copie qualquer exemplo <strong>cURL</strong> acima e cole no Insomnia (<em>Import → From Clipboard</em>) ou Postman (<em>Import → Raw text</em>). A ferramenta monta a requisição automaticamente — método, URL, headers e corpo.</p>
+    <!-- Insomnia / Postman -->
+    <div class="card" id="insomnia" x-show="bate($el.textContent)">
+      <h2>Insomnia / Postman</h2>
+      <p class="muted">Copie qualquer exemplo <strong>cURL</strong> acima e cole no Insomnia (<em>Import → From Clipboard</em>) ou Postman (<em>Import → Raw text</em>). A ferramenta monta a requisição automaticamente — método, URL, headers e corpo.</p>
+    </div>
+
+  </div>
 </div>
