@@ -47,6 +47,14 @@ export function buildApp(): FastifyInstance {
             ? { target: 'pino-pretty', options: { colorize: true } }
             : undefined,
         },
+    // Sem isto, `request.ip` sempre resolvia pro gateway Docker (o Cloudflare Tunnel
+    // roda no host, fora do compose, e chega no container por ali) — todo o tráfego
+    // externo virava um "IP" só, inutilizando qualquer rate-limit por IP. 'loopback' +
+    // 'uniquelocal' confia só nas faixas privadas (RFC1918) — nunca alcançáveis por um
+    // IP público de verdade — então o X-Forwarded-For só é honrado quando o hop
+    // imediato é realmente interno; um atacante externo não consegue se passar por isso
+    // não importa o header que ele mande.
+    trustProxy: ['loopback', 'uniquelocal'],
   })
 
   // ── Plugins ───────────────────────────────────────────────────

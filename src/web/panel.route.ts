@@ -46,6 +46,12 @@ import {
 import { deleteClientCascade, deleteInstanceCascade } from '../services/cascade-delete.service'
 import { getQueueStats, getRecentMessages, getCampaignProgress } from '../services/monitor.service'
 import { enqueueWebhookDelivery } from '../queues/webhook.queue'
+import {
+  getOrSetDeviceId,
+  verificarBloqueio,
+  registrarTentativaFalha,
+  limparAposSucesso,
+} from '../services/login-rate-limit.service'
 
 // Nome do cookie de sessão do painel (mesmo JWT da API).
 const COOKIE_NAME = 'token'
@@ -307,6 +313,19 @@ export async function panelRoutes(app: FastifyInstance) {
       })
     }
 
+    // Cookie de dispositivo (Camada C) — gerado aqui se ainda não existir.
+    const dispositivoId = getOrSetDeviceId(request, reply)
+
+    const bloqueio = await verificarBloqueio(request.ip, parsed.data.email, dispositivoId)
+    if (bloqueio.bloqueado) {
+      reply.status(429)
+      return renderPage(app, reply, 'login', {
+        title: 'Entrar — ApiEnvios',
+        error: `Muitas tentativas. Tente novamente em ${Math.ceil(bloqueio.segundosRestantes / 60)} min.`,
+        email: parsed.data.email,
+      })
+    }
+
     const user = await prisma.user.findUnique({
       where: { email: parsed.data.email },
       include: { apiClient: true },
@@ -317,6 +336,7 @@ export async function panelRoutes(app: FastifyInstance) {
       : false
 
     if (!user || !ok) {
+      await registrarTentativaFalha(request.ip, parsed.data.email, dispositivoId)
       reply.status(401)
       return renderPage(app, reply, 'login', {
         title: 'Entrar — ApiEnvios',
@@ -324,6 +344,8 @@ export async function panelRoutes(app: FastifyInstance) {
         email: parsed.data.email,
       })
     }
+
+    await limparAposSucesso(request.ip, parsed.data.email)
 
     // Assina o MESMO JWT da API e grava em cookie httpOnly.
     const token = app.jwt.sign({

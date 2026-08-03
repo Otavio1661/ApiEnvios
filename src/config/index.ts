@@ -70,6 +70,30 @@ export const config = {
     alertEmail: process.env.ALERT_EMAIL ?? '',
   },
 
+  // Rate limit de login (3 camadas — ver login-rate-limit.service.ts):
+  // conta = IP+email (mira numa conta específica); ip = IP sozinho (todas as contas,
+  // credential stuffing); dispositivo = cookie de dispositivo, sem IP (atacante
+  // trocando de IP). Qualquer camada estourando bloqueia a tentativa.
+  loginThrottle: {
+    conta: {
+      maxTentativas: Number(process.env.LOGIN_MAX_TENTATIVAS_CONTA ?? 5),
+      janelaMin: Number(process.env.LOGIN_JANELA_CONTA_MIN ?? 15),
+    },
+    ip: {
+      maxTentativas: Number(process.env.LOGIN_MAX_TENTATIVAS_IP ?? 20),
+      janelaMin: Number(process.env.LOGIN_JANELA_IP_MIN ?? 15),
+    },
+    dispositivo: {
+      maxTentativas: Number(process.env.LOGIN_MAX_TENTATIVAS_DISPOSITIVO ?? 20),
+      janelaMin: Number(process.env.LOGIN_JANELA_DISPOSITIVO_MIN ?? 15),
+    },
+    // IPs que nunca são bloqueados (ex.: escritório/VPN do próprio dono), separados por vírgula.
+    ipAllowlist: (process.env.LOGIN_IP_ALLOWLIST ?? '')
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter(Boolean),
+  },
+
   // Admin inicial do painel, provisionado pelo seed a partir do ambiente.
   // Sem valores default para email/senha: vazio = criação do admin desativada
   // (o seed roda normalmente, apenas pula a etapa). NUNCA hardcode credenciais.

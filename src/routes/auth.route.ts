@@ -7,6 +7,12 @@ import { z } from 'zod'
 import { authJwt } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
 import { hashPassword, verifyPassword } from '../utils/password'
+import {
+  getOrSetDeviceId,
+  verificarBloqueio,
+  registrarTentativaFalha,
+  limparAposSucesso,
+} from '../services/login-rate-limit.service'
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -26,6 +32,19 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Payload inválido', details: body.error.flatten() })
     }
 
+    // Cookie de dispositivo (Camada C) — clientes que não retêm cookie (integrações
+    // servidor-a-servidor) simplesmente não acumulam essa camada; degrada pras
+    // Camadas A+B, que continuam valendo.
+    const dispositivoId = getOrSetDeviceId(request, reply)
+
+    const bloqueio = await verificarBloqueio(request.ip, body.data.email, dispositivoId)
+    if (bloqueio.bloqueado) {
+      return reply.status(429).send({
+        error: 'Muitas tentativas de login. Tente novamente mais tarde.',
+        retryAfterSeconds: bloqueio.segundosRestantes,
+      })
+    }
+
     const user = await prisma.user.findUnique({
       where: { email: body.data.email },
       include: { apiClient: true },
@@ -33,13 +52,17 @@ export async function authRoutes(app: FastifyInstance) {
 
     // Mensagem genérica (não revela se o e-mail existe).
     if (!user || !user.apiClient.active) {
+      await registrarTentativaFalha(request.ip, body.data.email, dispositivoId)
       return reply.status(401).send({ error: 'Credenciais inválidas' })
     }
 
     const ok = await verifyPassword(body.data.password, user.passwordHash)
     if (!ok) {
+      await registrarTentativaFalha(request.ip, body.data.email, dispositivoId)
       return reply.status(401).send({ error: 'Credenciais inválidas' })
     }
+
+    await limparAposSucesso(request.ip, body.data.email)
 
     const token = app.jwt.sign({
       userId: user.id,
