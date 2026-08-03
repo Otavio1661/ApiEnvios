@@ -8,6 +8,11 @@ export interface JwtUserPayload {
   userId: string
   apiClientId: string
   accountRole: string   // papel de plataforma da conta (ClientRole: ADMIN | CLIENT)
+  // ID único deste login — usado pra rastrear a sessão no Redis
+  // (session-activity.service.ts), permitindo revogar/expirar por
+  // inatividade ANTES do JWT em si vencer. Sem isso o logout só
+  // conseguiria limpar o cookie, nunca invalidar o token de verdade.
+  jti: string
 }
 
 // ── Dados do usuário autenticado anexados pelo guard authJwt ──

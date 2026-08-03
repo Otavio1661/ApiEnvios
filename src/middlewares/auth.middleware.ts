@@ -2,6 +2,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import { prisma } from '../utils/prisma'
 import { config } from '../config'
+import { estaAtiva, renovar } from '../services/session-activity.service'
+import type { JwtUserPayload } from '../types'
 
 // ── Auth por API key de conta (gestão) ────────────────────────
 // Resolve o ApiClient pela apiKey (header x-api-key ou Bearer) e o anexa
@@ -127,11 +129,19 @@ export async function resolveTenantContext(request: FastifyRequest) {
 // e o User do payload, e anexa request.apiClient (REUSA o escopo por tenant)
 // + request.authUser. 401 se inválido/expirado ou conta inativa.
 export async function authJwt(request: FastifyRequest, reply: FastifyReply) {
-  let payload: { userId: string; apiClientId: string; accountRole: string }
+  let payload: JwtUserPayload
   try {
     payload = await request.jwtVerify()
   } catch {
     return reply.status(401).send({ error: 'Token inválido ou expirado' })
+  }
+
+  // Sessão precisa estar viva no Redis — cobre logout (POST /auth/logout) e
+  // inatividade (TTL deslizante), nenhum dos dois que o JWT sozinho resolve.
+  if (!process.env.VITEST) {
+    const viva = await estaAtiva(payload.jti)
+    if (!viva) return reply.status(401).send({ error: 'Sessão expirada. Faça login novamente.' })
+    await renovar(payload.jti)
   }
 
   const user = await prisma.user.findUnique({

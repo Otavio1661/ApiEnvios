@@ -23,6 +23,10 @@ export const config = {
     // JWT para login humano (usuários gerenciam as próprias instâncias)
     jwtSecret: process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+    // Teto absoluto de defesa em profundidade. Quem realmente expira por
+    // inatividade é o registro em Redis (ver session-activity.service.ts) —
+    // este valor só limita o pior caso se o Redis falhar de algum jeito.
+    sessionIdleTimeoutMin: Number(process.env.SESSION_IDLE_TIMEOUT_MIN ?? 30),
   },
 
   db: {

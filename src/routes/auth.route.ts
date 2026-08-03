@@ -13,6 +13,8 @@ import {
   registrarTentativaFalha,
   limparAposSucesso,
 } from '../services/login-rate-limit.service'
+import { marcarAtiva, encerrarSessao } from '../services/session-activity.service'
+import { randomUUID } from 'node:crypto'
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -64,17 +66,31 @@ export async function authRoutes(app: FastifyInstance) {
 
     await limparAposSucesso(request.ip, body.data.email)
 
+    // jti identifica esta sessão no Redis (session-activity.service.ts) — é
+    // o que permite revogar/expirar por inatividade antes do JWT em si vencer.
+    const jti = randomUUID()
     const token = app.jwt.sign({
       userId: user.id,
       apiClientId: user.apiClientId,
       accountRole: user.apiClient.role,
+      jti,
     })
+    await marcarAtiva(jti)
 
     return reply.send({
       token,
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
       account: { id: user.apiClient.id, name: user.apiClient.name },
     })
+  })
+
+  // ── POST /auth/logout — Revoga o token atual ──────────────────
+  // JWT é stateless — sem isso, "logout" não faria nada além do cliente
+  // descartar o token, que continuaria válido até expirar sozinho.
+  app.post('/auth/logout', { preHandler: authJwt }, async (request, reply) => {
+    // authJwt (preHandler) já verificou o token e populou request.user.
+    await encerrarSessao(request.user.jti)
+    return reply.send({ ok: true })
   })
 
   // ── GET /auth/me — Perfil do usuário autenticado ──────────────

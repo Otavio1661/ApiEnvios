@@ -52,6 +52,9 @@ import {
   registrarTentativaFalha,
   limparAposSucesso,
 } from '../services/login-rate-limit.service'
+import { marcarAtiva, estaAtiva, renovar, encerrarSessao } from '../services/session-activity.service'
+import { randomUUID } from 'node:crypto'
+import type { JwtUserPayload } from '../types'
 
 // Nome do cookie de sessão do painel (mesmo JWT da API).
 const COOKIE_NAME = 'token'
@@ -91,12 +94,20 @@ async function requirePanelAuth(request: FastifyRequest, reply: FastifyReply) {
   const raw = request.cookies?.[COOKIE_NAME]
   if (!raw) return reply.redirect('/admin/login')
 
-  let payload: { userId: string; apiClientId: string; accountRole: string }
+  let payload: JwtUserPayload
   try {
     // @fastify/jwt configurado para aceitar o cookie (server.ts).
     payload = await request.jwtVerify()
   } catch {
     return reply.redirect('/admin/login')
+  }
+
+  // Sessão precisa estar viva no Redis — cobre logout (encerrarSessao) e
+  // inatividade (TTL deslizante), nenhum dos dois que o JWT sozinho resolve.
+  if (!process.env.VITEST) {
+    const viva = await estaAtiva(payload.jti)
+    if (!viva) return reply.redirect('/admin/login')
+    await renovar(payload.jti)
   }
 
   const user = await prisma.user.findUnique({
@@ -284,16 +295,17 @@ export async function panelRoutes(app: FastifyInstance) {
     // sumiu) e /login manda de volta pra /admin (só olhou a assinatura).
     if (request.cookies?.[COOKIE_NAME]) {
       try {
-        const payload = await request.jwtVerify<{ userId: string }>()
-        const user = await prisma.user.findUnique({
-          where: { id: payload.userId },
-          include: { apiClient: true },
-        })
+        const payload = await request.jwtVerify<JwtUserPayload>()
+        const sessaoViva = process.env.VITEST ? true : await estaAtiva(payload.jti)
+        const user = sessaoViva
+          ? await prisma.user.findUnique({ where: { id: payload.userId }, include: { apiClient: true } })
+          : null
         if (user && user.apiClient.active) {
           return reply.redirect('/admin')
         }
-        // Cookie com assinatura válida mas órfão (usuário/conta não existe
-        // mais) — limpa pra não voltar a cair no loop na próxima visita.
+        // Cookie com assinatura válida mas órfão (usuário/conta sumiu) OU
+        // sessão já encerrada/expirada por inatividade — limpa pra não
+        // voltar a cair no loop na próxima visita.
         reply.clearCookie(COOKIE_NAME, cookieOptions())
       } catch {
         // JWT inválido/expirado → mostra login normalmente
@@ -347,18 +359,33 @@ export async function panelRoutes(app: FastifyInstance) {
 
     await limparAposSucesso(request.ip, parsed.data.email)
 
-    // Assina o MESMO JWT da API e grava em cookie httpOnly.
+    // Assina o MESMO JWT da API e grava em cookie httpOnly. jti identifica
+    // esta sessão no Redis (session-activity.service.ts) — é o que permite
+    // revogar/expirar por inatividade antes do JWT em si vencer.
+    const jti = randomUUID()
     const token = app.jwt.sign({
       userId: user.id,
       apiClientId: user.apiClientId,
       accountRole: user.apiClient.role,
+      jti,
     })
+    await marcarAtiva(jti)
     reply.setCookie(COOKIE_NAME, token, cookieOptions())
     return reply.redirect('/admin')
   })
 
   // ── POST /logout ───────────────────────────────────────────
-  app.post('/logout', async (_request, reply) => {
+  app.post('/logout', async (request, reply) => {
+    // Encerra a sessão no Redis — sem isso o token continuaria válido
+    // (assinatura/expiração OK) até o JWT_EXPIRES_IN natural, mesmo depois
+    // do "logout". Se o cookie já estiver ausente/inválido, não há o que
+    // revogar — segue pro clearCookie normalmente.
+    try {
+      const payload = await request.jwtVerify<{ jti: string }>()
+      await encerrarSessao(payload.jti)
+    } catch {
+      // token ausente/inválido/expirado — nada pra revogar
+    }
     reply.clearCookie(COOKIE_NAME, cookieOptions())
     return reply.redirect('/admin/login')
   })
