@@ -166,7 +166,7 @@ export async function registerInboundWebhook(
   try {
     const provider = providers[instance.provider]
     const providerInstanceId = instance.instanceId ?? `inst-${instance.id}`
-    const url = `${config.app.publicBaseUrl}/v1/webhooks/inbound/${instance.provider.toLowerCase()}/${instance.id}`
+    const url = `${config.app.publicBaseUrl}/v1/webhooks/inbound/${instance.provider.toLowerCase()}/${instance.id}?ws=${instance.webhookSecret}`
     await provider.setWebhook(providerInstanceId, url)
     log.info(`[Instances] webhook inbound registrado (${instance.provider}): ${url}`)
   } catch (err: any) {
@@ -291,6 +291,62 @@ export async function createInstance(input: {
       },
     })
   } catch (err) {
+    throw mapUniqueViolation(err)
+  }
+}
+
+// Junta assertInstanceQuota() + createInstance() numa única transação, travando
+// a linha do ApiClient ANTES de contar — sem isso, duas criações quase
+// simultâneas (double-click, 2 requests em paralelo) liam a mesma contagem
+// antes de qualquer INSERT completar e furavam o `maxInstances` do plano.
+// Usar esta função em vez de chamar as duas separadas (SUPER_ADMIN continua
+// pulando a checagem, chamando createInstance() direto, como já faz hoje).
+export async function createInstanceWithQuota(input: {
+  name?: string
+  slug?: string
+  provider: Instance['provider']
+  priority?: number
+  apiClientId: string
+  ownerUserId?: string | null
+}): Promise<Instance> {
+  const slug = input.slug
+    ? normalizeExplicitSlug(input.slug)
+    : await generateUniqueSlug(input.name ?? input.provider.toLowerCase())
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Trava a linha da conta primeiro: serializa tentativas concorrentes de
+      // criar instância para o MESMO apiClientId — só assim o count() logo
+      // abaixo fica confiável (nenhuma outra transação pode inserir entre o
+      // count e o create enquanto esta não commitar/abortar).
+      await tx.$queryRaw`SELECT id FROM "ApiClient" WHERE id = ${input.apiClientId} FOR UPDATE`
+
+      const client = await tx.apiClient.findUnique({
+        where: { id: input.apiClientId },
+        select: { maxInstances: true },
+      })
+      const max = client?.maxInstances ?? 1
+      const count = await tx.instance.count({ where: { apiClientId: input.apiClientId } })
+      if (count >= max) {
+        throw new InstanceError(
+          `Limite de instâncias da conta atingido (${max}). Contate o administrador para aumentar.`,
+          'QUOTA_EXCEEDED',
+        )
+      }
+
+      return tx.instance.create({
+        data: {
+          name: input.name,
+          slug,
+          provider: input.provider,
+          priority: input.priority ?? 0,
+          apiClientId: input.apiClientId,
+          ownerUserId: input.ownerUserId ?? null,
+        },
+      })
+    })
+  } catch (err) {
+    if (err instanceof InstanceError) throw err
     throw mapUniqueViolation(err)
   }
 }
@@ -488,9 +544,15 @@ export async function registerNumberInboundWebhook(
   log: FastifyBaseLogger,
 ): Promise<void> {
   try {
+    // O segredo é o da Instance PAI (InstanceNumber não tem um próprio) —
+    // ver comentário de Instance.webhookSecret no schema.
+    const parent = await prisma.instance.findUnique({
+      where: { id: number.instanceId },
+      select: { webhookSecret: true },
+    })
     const provider = providers[number.provider]
     const providerInstanceId = number.providerInstanceId ?? `num-${number.id}`
-    const url = `${config.app.publicBaseUrl}/v1/webhooks/inbound/${number.provider.toLowerCase()}/number/${number.id}`
+    const url = `${config.app.publicBaseUrl}/v1/webhooks/inbound/${number.provider.toLowerCase()}/number/${number.id}?ws=${parent?.webhookSecret}`
     await provider.setWebhook(providerInstanceId, url)
     log.info(`[Numbers] webhook inbound registrado (${number.provider}): ${url}`)
   } catch (err: any) {

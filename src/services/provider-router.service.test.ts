@@ -15,7 +15,12 @@ import type { SendMessagePayload } from '../types'
 const prismaMock = vi.hoisted(() => ({
   apiClient: { findUnique: vi.fn() },
   instance: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
-  instanceNumber: { findMany: vi.fn(), update: vi.fn() },
+  // findUnique: usado pela reconferência de sentToday pós-lock (dispatchToNumber).
+  // Default bem abaixo de qualquer limite — clearAllMocks() (usado nos beforeEach
+  // deste arquivo) não apaga a implementação, só o histórico de chamadas, então
+  // este default sobrevive entre testes; só os testes dedicados à reconferência
+  // sobrescrevem com .mockResolvedValueOnce(...).
+  instanceNumber: { findMany: vi.fn(), update: vi.fn(), findUnique: vi.fn().mockResolvedValue({ sentToday: 0 }) },
   numberRotation: { create: vi.fn() },
 }))
 vi.mock('../utils/prisma', () => ({ prisma: prismaMock }))
@@ -212,6 +217,29 @@ describe('sendViaInstance (envio dedicado, via pool de números)', () => {
     expect(res.success).toBe(true)
     expect(res.numberId).toBe('B')
     expect(res.providerId).toBe('PID-B')
+  })
+
+  it('reconfere sentToday DEPOIS do lock — número estourou o teto entre a seleção e o envio (TOCTOU)', async () => {
+    // Pool escolhe A (sentToday=199 no momento da seleção), mas outro job
+    // concorrente já mandou mensagem por ele entre a seleção e o lock — a
+    // reconferência pós-lock vê sentToday=200 (no teto) e NÃO chama o provider,
+    // rotacionando pro próximo (B).
+    prismaMock.instanceNumber.findMany.mockResolvedValueOnce([
+      makeNumber({ id: 'A', sentToday: 199 }),
+      makeNumber({ id: 'B', sentToday: 0 }),
+    ])
+    prismaMock.instanceNumber.findUnique
+      .mockResolvedValueOnce({ sentToday: 200 }) // reconferência de A: já estourou
+      .mockResolvedValueOnce({ sentToday: 0 })   // reconferência de B: ok
+    prismaMock.instanceNumber.update.mockResolvedValue({})
+    evolutionSend.mockResolvedValueOnce({ success: true, providerId: 'PID-B' })
+
+    const res = await sendViaInstance(makeInstance({}), payload)
+
+    expect(res.success).toBe(true)
+    expect(res.numberId).toBe('B')
+    // Só 1 chamada ao provider (pelo B) — A foi barrado ANTES de chamar o provider.
+    expect(evolutionSend).toHaveBeenCalledTimes(1)
   })
 
   it('detecta ban no erro, marca o NÚMERO BANNED, cria rotação com numberId e notifica', async () => {

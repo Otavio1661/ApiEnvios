@@ -104,6 +104,14 @@ async function processJob(job: Job<SendJobData>) {
       },
     })
 
+    // Contador de billing da conta — incrementa só no envio efetivamente
+    // confirmado (não em tentativas falhas nem em reenvios/retries do BullMQ,
+    // já que este bloco só roda uma vez por mensagem, quando result.success).
+    await prisma.apiClient.update({
+      where: { id: message.apiClientId },
+      data: { totalSent: { increment: 1 } },
+    })
+
     // Confirmação de SUCESSO (escopada ao tenant). Opt-in: só quem assina
     // MESSAGE_DELIVERED recebe. Permite ao consumidor (ex.: alvará) confirmar o
     // envio real — não o otimista do QUEUED. Dispara uma vez, no sucesso do envio.

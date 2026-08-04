@@ -4,16 +4,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Prisma } from '@prisma/client'
 
-const prismaMock = vi.hoisted(() => ({
-  instance: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
-  instanceNumber: {
-    findFirst: vi.fn(),
-    findMany: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-  },
-}))
+const prismaMock = vi.hoisted(() => {
+  const mock: any = {
+    instance: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), count: vi.fn() },
+    instanceNumber: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    },
+    apiClient: { findUnique: vi.fn() },
+    $queryRaw: vi.fn(),
+  }
+  // Simula a transação interativa do Prisma: executa o callback passando o
+  // próprio mock como `tx` (mesmos métodos mockados acima).
+  mock.$transaction = vi.fn(async (fn: any) => fn(mock))
+  return mock
+})
 vi.mock('../utils/prisma', () => ({ prisma: prismaMock }))
 
 // Mock dos providers (createInstance/connect/getInstanceStatus/setWebhook/deleteInstance).
@@ -55,6 +63,7 @@ import {
   addNumber,
   connectNumber,
   deleteNumber,
+  createInstanceWithQuota,
 } from './instance.service'
 
 function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
@@ -95,6 +104,42 @@ describe('generateUniqueSlug', () => {
   it('ignora a própria instância ao renomear', async () => {
     prismaMock.instance.findUnique.mockResolvedValueOnce({ id: 'self' })
     expect(await generateUniqueSlug('vendas', 'self')).toBe('vendas')
+  })
+})
+
+describe('createInstanceWithQuota — trava a conta antes de contar (TOCTOU)', () => {
+  it('cria quando abaixo da quota', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue(null) // slug livre
+    prismaMock.apiClient.findUnique.mockResolvedValueOnce({ maxInstances: 3 })
+    prismaMock.instance.count.mockResolvedValueOnce(1)
+    prismaMock.instance.create.mockResolvedValueOnce({ id: 'i-nova', apiClientId: 'tenant-A' })
+
+    const instance = await createInstanceWithQuota({
+      provider: 'WUZAPI',
+      slug: 'vendas',
+      apiClientId: 'tenant-A',
+    })
+
+    expect(instance).toMatchObject({ id: 'i-nova' })
+    // A conta é travada ANTES do count/create (FOR UPDATE), dentro da mesma transação.
+    expect(prismaMock.$queryRaw).toHaveBeenCalled()
+    expect(prismaMock.$transaction).toHaveBeenCalled()
+  })
+
+  it('rejeita com QUOTA_EXCEEDED quando count >= maxInstances', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue(null)
+    prismaMock.apiClient.findUnique.mockResolvedValueOnce({ maxInstances: 2 })
+    prismaMock.instance.count.mockResolvedValueOnce(2)
+
+    const err = await createInstanceWithQuota({
+      provider: 'WUZAPI',
+      slug: 'vendas',
+      apiClientId: 'tenant-A',
+    }).catch((e) => e)
+
+    expect(err).toBeInstanceOf(InstanceError)
+    expect(err.code).toBe('QUOTA_EXCEEDED')
+    expect(prismaMock.instance.create).not.toHaveBeenCalled()
   })
 })
 

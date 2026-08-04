@@ -11,14 +11,13 @@ import {
   ProvisioningError,
   createClientWithOwner,
   createUserForClient,
-  listClients,
-  listUsers,
   deleteUser,
   updateClient,
   updateUser,
 } from '../services/provisioning.service'
 import { deleteClientCascade, deleteInstanceCascade } from '../services/cascade-delete.service'
 import { listAllInstances } from '../services/instance.service'
+import { prisma } from '../utils/prisma'
 
 const createClientSchema = z.object({
   name: z.string().min(1),
@@ -100,11 +99,36 @@ export async function adminRoutes(app: FastifyInstance) {
     },
   })
 
-  // ── GET /admin/clients — Lista as contas ──────────────────────
+  // ── GET /admin/clients — Lista as contas (paginado) ───────────
   app.get('/admin/clients', {
     preHandler: [authAccount, requireAdmin],
-    handler: async (_request, reply) => {
-      return reply.send(await listClients())
+    handler: async (request, reply) => {
+      const q = request.query as { page?: string; limit?: string }
+      const page = Math.max(1, Number(q.page ?? 1))
+      const limit = Math.min(100, Math.max(1, Number(q.limit ?? 20)))
+
+      const [clients, total] = await Promise.all([
+        prisma.apiClient.findMany({
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            active: true,
+            fallbackEnabled: true,
+            rateLimit: true,
+            maxPerRecipientPerHour: true,
+            maxInstances: true,
+            totalSent: true,
+            createdAt: true,
+            _count: { select: { instances: true, users: true } },
+          },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.apiClient.count(),
+      ])
+      return reply.send({ data: clients, page, limit, total })
     },
   })
 
@@ -141,12 +165,34 @@ export async function adminRoutes(app: FastifyInstance) {
     },
   })
 
-  // ── GET /admin/users — Lista usuários (filtrável por apiClientId) ─
+  // ── GET /admin/users — Lista usuários (filtrável por apiClientId, paginado) ─
   app.get('/admin/users', {
     preHandler: [authAccount, requireAdmin],
     handler: async (request, reply) => {
-      const query = request.query as { apiClientId?: string }
-      return reply.send(await listUsers(query.apiClientId))
+      const query = request.query as { apiClientId?: string; page?: string; limit?: string }
+      const page = Math.max(1, Number(query.page ?? 1))
+      const limit = Math.min(100, Math.max(1, Number(query.limit ?? 20)))
+      const where = query.apiClientId ? { apiClientId: query.apiClientId } : undefined
+
+      const [users, total] = await Promise.all([
+        prisma.user.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            emailVerified: true,
+            apiClientId: true,
+            createdAt: true,
+          },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.user.count({ where }),
+      ])
+      return reply.send({ data: users, page, limit, total })
     },
   })
 

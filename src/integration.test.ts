@@ -10,9 +10,9 @@ import type { FastifyInstance } from 'fastify'
 // ── Mock do Prisma ────────────────────────────────────────────
 // Cada model expõe os métodos usados pelas rotas cobertas aqui.
 const prismaMock = vi.hoisted(() => ({
-  apiClient: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
-  instance: { findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
-  user: { findUnique: vi.fn(), create: vi.fn() },
+  apiClient: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
+  instance: { findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), count: vi.fn() },
+  user: { findUnique: vi.fn(), create: vi.fn(), count: vi.fn() },
   message: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
   webhook: { findMany: vi.fn() },
   $transaction: vi.fn(),
@@ -127,8 +127,8 @@ describe('Isolamento entre tenants', () => {
     expect(prismaMock.instance.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { apiClientId: 'tenant-A' } }),
     )
-    expect(Array.isArray(body)).toBe(true)
-    expect(body.every((i: any) => i.id === 'i-A')).toBe(true)
+    expect(Array.isArray(body.data)).toBe(true)
+    expect(body.data.every((i: any) => i.id === 'i-A')).toBe(true)
     await app.close()
   })
 })
@@ -140,14 +140,14 @@ describe('Inbound de status', () => {
   }
 
   it('aplica SENT → DELIVERED (status avança e grava deliveredAt)', async () => {
-    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'CLOUD_API' })
+    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'CLOUD_API', webhookSecret: 'segredo-1' })
     prismaMock.message.findFirst.mockResolvedValue({ id: 'msg-1', status: 'SENT', apiClientId: 'tenant-A', toPhone: '55', readAt: null, deliveredAt: null })
     prismaMock.message.update.mockResolvedValue({})
 
     app = await makeApp()
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/webhooks/inbound/cloud_api/inst-1',
+      url: '/v1/webhooks/inbound/cloud_api/inst-1?ws=segredo-1',
       payload: cloudDeliveredPayload,
     })
     expect(res.statusCode).toBe(200)
@@ -161,13 +161,13 @@ describe('Inbound de status', () => {
   })
 
   it('NÃO regride READ → DELIVERED (status não avança → sem update)', async () => {
-    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'CLOUD_API' })
+    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'CLOUD_API', webhookSecret: 'segredo-1' })
     prismaMock.message.findFirst.mockResolvedValue({ id: 'msg-1', status: 'READ', apiClientId: 'tenant-A', toPhone: '55', readAt: new Date(), deliveredAt: new Date() })
 
     app = await makeApp()
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/webhooks/inbound/cloud_api/inst-1',
+      url: '/v1/webhooks/inbound/cloud_api/inst-1?ws=segredo-1',
       payload: cloudDeliveredPayload,
     })
     expect(res.statusCode).toBe(200)
@@ -176,7 +176,7 @@ describe('Inbound de status', () => {
   })
 
   it('WuzAPI ReadReceipt (form-encoded) aplica SENT → DELIVERED', async () => {
-    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'WUZAPI' })
+    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'WUZAPI', webhookSecret: 'segredo-1' })
     prismaMock.message.findFirst.mockResolvedValue({ id: 'msg-1', status: 'SENT', apiClientId: 'tenant-A', toPhone: '55', readAt: null, deliveredAt: null })
     prismaMock.message.update.mockResolvedValue({})
 
@@ -185,7 +185,7 @@ describe('Inbound de status', () => {
     app = await makeApp()
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/webhooks/inbound/wuzapi/inst-1',
+      url: '/v1/webhooks/inbound/wuzapi/inst-1?ws=segredo-1',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       payload: `instanceName=inst-1&userID=u1&jsonData=${encodeURIComponent(jsonData)}`,
     })
@@ -196,6 +196,27 @@ describe('Inbound de status', () => {
         data: expect.objectContaining({ status: 'DELIVERED' }),
       }),
     )
+    await app.close()
+  })
+
+  it('ws ausente/errado → 401, sem processar o evento', async () => {
+    prismaMock.instance.findUnique.mockResolvedValue({ id: 'inst-1', apiClientId: 'tenant-A', provider: 'CLOUD_API', webhookSecret: 'segredo-1' })
+
+    app = await makeApp()
+    const semWs = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/inbound/cloud_api/inst-1',
+      payload: cloudDeliveredPayload,
+    })
+    expect(semWs.statusCode).toBe(401)
+
+    const wsErrado = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/inbound/cloud_api/inst-1?ws=errado',
+      payload: cloudDeliveredPayload,
+    })
+    expect(wsErrado.statusCode).toBe(401)
+    expect(prismaMock.message.findFirst).not.toHaveBeenCalled()
     await app.close()
   })
 

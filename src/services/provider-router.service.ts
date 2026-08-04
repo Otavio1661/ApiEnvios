@@ -94,6 +94,25 @@ async function dispatchToNumber(
     }
   }
 
+  // Reconfere o teto diário de warm-up DEPOIS de pegar o lock. A checagem em
+  // eligiblePoolNumbers() só acontece uma vez, antes de qualquer lock — com o
+  // worker rodando concurrency>1, vários jobs podiam ler o mesmo `sentToday`
+  // (ainda não incrementado) e todos passarem na checagem, furando o teto do
+  // número quando o lock só serializa o ENVIO, não a decisão de enviar.
+  const fresco = await prisma.instanceNumber.findUnique({
+    where: { id: number.id },
+    select: { sentToday: true },
+  })
+  if (fresco && fresco.sentToday >= dailyLimitFor(number)) {
+    if (release) await release()
+    return {
+      success: false,
+      provider: number.provider,
+      numberId: number.id,
+      error: 'Limite diário de warm-up do número atingido',
+    }
+  }
+
   let result: ProviderSendResult
   try {
     if (payload.type === 'BUTTONS') {

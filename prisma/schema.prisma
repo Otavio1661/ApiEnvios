@@ -15,18 +15,24 @@ datasource db {
 // INSTÂNCIAS WHATSAPP (entidade central — uma por número/sessão de provider)
 // ─────────────────────────────────────────────
 model Instance {
-  id          String   @id @default(cuid())
-  name        String?                       // nome amigável (apelido), único por tenant — ex: "Vendas-SP"
-  slug        String?  @unique              // slug único GLOBAL para uso na URL/API — ex: "vendas-sp"
-  phone       String?                       // ex: "5544999990000" — null até conectar via QR
-  label       String?                       // ex: "Número Principal Gazin"
-  provider    Provider                      // EVOLUTION | WAHA | CLOUD_API
-  instanceId  String?                       // ID da instância no provider
-  status      NumberStatus @default(ACTIVE)
-  priority    Int          @default(0)      // menor = maior prioridade no fallback
+  id         String       @id @default(cuid())
+  name       String? // nome amigável (apelido), único por tenant — ex: "Vendas-SP"
+  slug       String?      @unique // slug único GLOBAL para uso na URL/API — ex: "vendas-sp"
+  phone      String? // ex: "5544999990000" — null até conectar via QR
+  label      String? // ex: "Número Principal Gazin"
+  provider   Provider // EVOLUTION | WAHA | CLOUD_API
+  instanceId String? // ID da instância no provider
+  status     NumberStatus @default(ACTIVE)
+  priority   Int          @default(0) // menor = maior prioridade no fallback
 
   // Token de envio (estilo UltraMsg)
-  token       String   @unique @default(cuid())
+  token String @unique @default(cuid())
+
+  // Segredo de autenticação dos webhooks INBOUND (callbacks do provider) —
+  // propósito diferente do `token` acima (que autoriza ENVIO). Embutido como
+  // query param (?ws=) na URL registrada no provider; validado nos handlers
+  // de src/routes/webhooks.route.ts via comparação timing-safe.
+  webhookSecret String @unique @default(cuid())
 
   // Estado de conexão (autenticação/QR — separado do ciclo de vida em `status`)
   connectionState InstanceConnState @default(DISCONNECTED)
@@ -44,26 +50,26 @@ model Instance {
   owner       User?   @relation("InstanceOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
 
   // Métricas anti-ban
-  sentToday      Int       @default(0)
-  sentTotal      Int       @default(0)
-  lastSentAt     DateTime?
-  lastResetAt    DateTime  @default(now())  // reset do contador diário
+  sentToday   Int       @default(0)
+  sentTotal   Int       @default(0)
+  lastSentAt  DateTime?
+  lastResetAt DateTime  @default(now()) // reset do contador diário
 
   // Ban tracking
-  bannedAt       DateTime?
-  banReason      String?
-  bannedCount    Int       @default(0)
+  bannedAt    DateTime?
+  banReason   String?
+  bannedCount Int       @default(0)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  messages    Message[]
-  rotations   NumberRotation[]
-  numbers     InstanceNumber[]   // Fase C1: pool de números filhos (aditivo; lógica ainda usa os campos acima)
-  campaigns   Campaign[]         // lotes que tiveram esta instância como alvo
+  messages  Message[]
+  rotations NumberRotation[]
+  numbers   InstanceNumber[] // Fase C1: pool de números filhos (aditivo; lógica ainda usa os campos acima)
+  campaigns Campaign[] // lotes que tiveram esta instância como alvo
 
   @@unique([apiClientId, phone])
-  @@unique([apiClientId, name])           // apelido único por tenant (NULLs distintos no Postgres)
+  @@unique([apiClientId, name]) // apelido único por tenant (NULLs distintos no Postgres)
   @@index([status, priority])
   @@index([provider])
   @@index([apiClientId, status])
@@ -77,17 +83,17 @@ model Instance {
 // continua usando a Instance. C2/C3/C4 movem a lógica e removem os legados.
 // ─────────────────────────────────────────────
 model InstanceNumber {
-  id         String   @id @default(cuid())
+  id String @id @default(cuid())
 
   instanceId String
   instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 
   provider           Provider
-  providerInstanceId String?               // ID da sessão no provider (= Instance.instanceId)
+  providerInstanceId String? // ID da sessão no provider (= Instance.instanceId)
   phone              String?
   label              String?
-  status             NumberStatus      @default(ACTIVE)
-  priority           Int               @default(0)
+  status             NumberStatus @default(ACTIVE)
+  priority           Int          @default(0)
 
   // Estado de conexão (autenticação/QR)
   connectionState InstanceConnState @default(DISCONNECTED)
@@ -121,64 +127,64 @@ model InstanceNumber {
 // MENSAGENS ENVIADAS
 // ─────────────────────────────────────────────
 model Message {
-  id              String        @id @default(cuid())
-  externalId      String?                // ID gerado pelo sistema cliente (idempotência por tenant)
+  id         String  @id @default(cuid())
+  externalId String? // ID gerado pelo sistema cliente (idempotência por tenant)
 
   // Tenant dono da mensagem
-  apiClientId     String
-  apiClient       ApiClient     @relation(fields: [apiClientId], references: [id])
+  apiClientId String
+  apiClient   ApiClient @relation(fields: [apiClientId], references: [id])
 
   // Destinatário
-  toPhone         String                 // ex: "5544988880000"
+  toPhone String // ex: "5544988880000"
 
   // Conteúdo
-  type            MessageType   @default(TEXT)
-  content         String                 // texto, URL da mídia/figurinha, nome do local/contato, ou pergunta da enquete
-  caption         String?                // legenda para mídias
+  type     MessageType @default(TEXT)
+  content  String // texto, URL da mídia/figurinha, nome do local/contato, ou pergunta da enquete
+  caption  String? // legenda para mídias
   // Interativo (type=BUTTONS): { footer?, buttons: [{displayText, type, url?, phoneNumber?}] }
-  buttons         Json?
+  buttons  Json?
   // Localização (type=LOCATION): { latitude, longitude }. `content` guarda o nome do local.
-  location        Json?
+  location Json?
   // Contato/vCard (type=CONTACT): { phone }. `content` guarda o nome do contato.
-  contact         Json?
+  contact  Json?
   // Enquete (type=POLL): { options: string[] }. `content` guarda a pergunta.
-  poll            Json?
+  poll     Json?
 
   // Roteamento
-  providerId      String?                // ID no provider (ex: message id do Evolution)
+  providerId      String? // ID no provider (ex: message id do Evolution)
   instanceId      String?
-  instance        Instance?     @relation(fields: [instanceId], references: [id])
+  instance        Instance?       @relation(fields: [instanceId], references: [id])
   // Fase C3: número do pool (InstanceNumber) que efetivou o envio. Aditivo/nullable.
   numberId        String?
   number          InstanceNumber? @relation(fields: [numberId], references: [id], onDelete: SetNull)
   provider        Provider?
-  providerAttempt Int           @default(1)  // qual tentativa (1=evolution, 2=waha, 3=cloud)
+  providerAttempt Int             @default(1) // qual tentativa (1=evolution, 2=waha, 3=cloud)
 
   // Lote (campanha) ao qual a mensagem pertence (envio em massa). Nullable.
-  campaignId      String?
-  campaign        Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   // Usuário humano que disparou (login JWT). null = envio por API key/token (máquina).
   createdByUserId String?
-  createdByUser   User?         @relation("MessageSender", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser   User?   @relation("MessageSender", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   // Status
-  status          MessageStatus @default(QUEUED)
-  errorMessage    String?
-  retryCount      Int           @default(0)
-  maxRetries      Int           @default(3)
+  status       MessageStatus @default(QUEUED)
+  errorMessage String?
+  retryCount   Int           @default(0)
+  maxRetries   Int           @default(3)
 
   // Timestamps
-  scheduledAt     DateTime?              // para envio agendado
-  sentAt          DateTime?
-  deliveredAt     DateTime?
-  readAt          DateTime?
-  failedAt        DateTime?
+  scheduledAt DateTime? // para envio agendado
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  failedAt    DateTime?
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  attempts        MessageAttempt[]
+  attempts MessageAttempt[]
 
   @@unique([apiClientId, externalId])
   @@index([status])
@@ -195,22 +201,22 @@ model Message {
 // CAMPANHAS (lotes de envio em massa) — Message.campaignId aponta para cá.
 // ─────────────────────────────────────────────
 model Campaign {
-  id              String   @id @default(cuid())
-  name            String?                         // rótulo opcional do lote
+  id   String  @id @default(cuid())
+  name String? // rótulo opcional do lote
 
-  apiClientId     String
-  apiClient       ApiClient @relation(fields: [apiClientId], references: [id])
+  apiClientId String
+  apiClient   ApiClient @relation(fields: [apiClientId], references: [id])
 
   // Instância alvo (opcional). SetNull: apagar a instância não apaga o lote.
-  instanceId      String?
-  instance        Instance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  instanceId String?
+  instance   Instance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
 
-  createdByUserId String?                         // usuário humano que disparou (informativo)
-  total           Int      @default(0)            // nº de mensagens enfileiradas no lote
+  createdByUserId String? // usuário humano que disparou (informativo)
+  total           Int     @default(0) // nº de mensagens enfileiradas no lote
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
-  messages        Message[]
+  messages Message[]
 
   @@index([apiClientId, createdAt])
 }
@@ -219,19 +225,19 @@ model Campaign {
 // TENTATIVAS DE ENVIO (histórico de fallback)
 // ─────────────────────────────────────────────
 model MessageAttempt {
-  id          String   @id @default(cuid())
-  messageId   String
-  message     Message  @relation(fields: [messageId], references: [id])
-  
-  provider    Provider
-  instanceId  String?
-  attempt     Int               // 1, 2, 3...
-  success     Boolean
-  errorCode   String?
-  errorMsg    String?
-  duration    Int?              // ms
-  
-  createdAt   DateTime @default(now())
+  id        String  @id @default(cuid())
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id])
+
+  provider   Provider
+  instanceId String?
+  attempt    Int // 1, 2, 3...
+  success    Boolean
+  errorCode  String?
+  errorMsg   String?
+  duration   Int? // ms
+
+  createdAt DateTime @default(now())
 
   @@index([messageId])
 }
@@ -240,19 +246,19 @@ model MessageAttempt {
 // ROTAÇÃO DE NÚMEROS
 // ─────────────────────────────────────────────
 model NumberRotation {
-  id          String   @id @default(cuid())
-  instanceId  String
-  instance    Instance @relation(fields: [instanceId], references: [id])
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   Instance @relation(fields: [instanceId], references: [id])
 
   // Fase C3: rotação por NÚMERO do pool (aditivo/nullable). Mantém instanceId
   // (compat) e referencia o InstanceNumber banido quando aplicável.
-  numberId    String?
-  number      InstanceNumber? @relation(fields: [numberId], references: [id], onDelete: SetNull)
+  numberId String?
+  number   InstanceNumber? @relation(fields: [numberId], references: [id], onDelete: SetNull)
 
-  reason      RotationReason   // BAN | LIMIT_REACHED | MANUAL | SCHEDULED
-  triggeredBy String?          // "auto" | "webhook" | userId
+  reason      RotationReason // BAN | LIMIT_REACHED | MANUAL | SCHEDULED
+  triggeredBy String? // "auto" | "webhook" | userId
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([instanceId])
   @@index([numberId])
@@ -262,38 +268,38 @@ model NumberRotation {
 // CLIENTES DA API (sistemas que consomem a API)
 // ─────────────────────────────────────────────
 model ApiClient {
-  id          String   @id @default(cuid())
-  name        String
-  apiKey      String   @unique @default(cuid())
-  active      Boolean  @default(true)
+  id     String  @id @default(cuid())
+  name   String
+  apiKey String  @unique @default(cuid())
+  active Boolean @default(true)
 
   // Papel do tenant
-  role        ClientRole @default(CLIENT)   // ADMIN | CLIENT
+  role ClientRole @default(CLIENT) // ADMIN | CLIENT
 
   // Fallback opt-in entre as instâncias do próprio tenant (+ Cloud API)
   fallbackEnabled Boolean @default(false)
 
   // Rate limiting por cliente
-  rateLimit   Int      @default(100)    // req/min
+  rateLimit Int @default(100) // req/min
 
   // Teto de mensagens para o MESMO número de destino por hora (anti-flood/spam),
   // contado por conta somando todas as instâncias. 0 = ilimitado. Editável pelo super admin.
   maxPerRecipientPerHour Int @default(10)
 
   // Quota de instâncias (pools) que a conta pode criar. SUPER_ADMIN ignora.
-  maxInstances Int     @default(1)
+  maxInstances Int @default(1)
 
   // Métricas
-  totalSent   Int      @default(0)
+  totalSent Int @default(0)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  instances   Instance[]
-  messages    Message[]
-  webhooks    Webhook[]
-  users       User[]
-  campaigns   Campaign[]
+  instances Instance[]
+  messages  Message[]
+  webhooks  Webhook[]
+  users     User[]
+  campaigns Campaign[]
 
   @@index([apiKey])
 }
@@ -306,21 +312,21 @@ model User {
   email         String   @unique
   passwordHash  String
   name          String?
-  role          UserRole @default(OWNER)   // papel DENTRO da conta
+  role          UserRole @default(OWNER) // papel DENTRO da conta
   emailVerified Boolean  @default(false)
 
   // Conta (tenant) à qual o usuário pertence
-  apiClientId   String
-  apiClient     ApiClient @relation(fields: [apiClientId], references: [id])
+  apiClientId String
+  apiClient   ApiClient @relation(fields: [apiClientId], references: [id])
 
   // Instâncias das quais este usuário é dono (escopo do MEMBER).
   ownedInstances Instance[] @relation("InstanceOwner")
 
   // Mensagens que este usuário disparou (para auditoria/monitor).
-  sentMessages   Message[]  @relation("MessageSender")
+  sentMessages Message[] @relation("MessageSender")
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([apiClientId])
 }
@@ -329,22 +335,22 @@ model User {
 // WEBHOOKS DE NOTIFICAÇÃO
 // ─────────────────────────────────────────────
 model Webhook {
-  id          String   @id @default(cuid())
-  url         String
-  events      String[] // ["BAN_DETECTED", "MESSAGE_FAILED", "NUMBER_ROTATED"]
-  active      Boolean  @default(true)
-  secret      String?  // para validação HMAC
+  id     String   @id @default(cuid())
+  url    String
+  events String[] // ["BAN_DETECTED", "MESSAGE_FAILED", "NUMBER_ROTATED"]
+  active Boolean  @default(true)
+  secret String? // para validação HMAC
 
   // Tenant dono do webhook (null = webhook global do admin)
   apiClientId String?
   apiClient   ApiClient? @relation(fields: [apiClientId], references: [id])
 
   // Histórico de entregas
-  lastCalledAt  DateTime?
-  failCount     Int      @default(0)
+  lastCalledAt DateTime?
+  failCount    Int       @default(0)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([apiClientId])
 }
@@ -353,46 +359,46 @@ model Webhook {
 // ENUMS
 // ─────────────────────────────────────────────
 enum Provider {
-  EVOLUTION   // Evolution API (principal)
-  WUZAPI      // WuzAPI (Go/whatsmeow) - suporta botões interativos
-  CLOUD_API   // WhatsApp Cloud API oficial - fallback pago
+  EVOLUTION // Evolution API (principal)
+  WUZAPI // WuzAPI (Go/whatsmeow) - suporta botões interativos
+  CLOUD_API // WhatsApp Cloud API oficial - fallback pago
 }
 
 enum NumberStatus {
-  ACTIVE      // funcionando
-  WARMING     // em warm-up (número novo, enviando menos)
-  BANNED      // banido pelo WhatsApp
-  SUSPENDED   // suspenso manualmente
-  RETIRED     // aposentado / substituído
+  ACTIVE // funcionando
+  WARMING // em warm-up (número novo, enviando menos)
+  BANNED // banido pelo WhatsApp
+  SUSPENDED // suspenso manualmente
+  RETIRED // aposentado / substituído
 }
 
 enum ClientRole {
-  ADMIN       // gerencia contas e instâncias de todos
-  CLIENT      // tenant comum
+  ADMIN // gerencia contas e instâncias de todos
+  CLIENT // tenant comum
 }
 
 enum UserRole {
-  OWNER        // dono da conta — exibido como "Admin" no painel
-  MEMBER       // membro convidado da conta — exibido como "Usuário"
-  SUPER_ADMIN  // staff da plataforma: controle global de todas as contas
+  OWNER // dono da conta — exibido como "Admin" no painel
+  MEMBER // membro convidado da conta — exibido como "Usuário"
+  SUPER_ADMIN // staff da plataforma: controle global de todas as contas
 }
 
 enum InstanceConnState {
-  DISCONNECTED  // sem sessão ativa
-  QR_PENDING    // aguardando leitura do QR
-  CONNECTED     // sessão autenticada
-  BANNED        // sessão banida pelo WhatsApp
+  DISCONNECTED // sem sessão ativa
+  QR_PENDING // aguardando leitura do QR
+  CONNECTED // sessão autenticada
+  BANNED // sessão banida pelo WhatsApp
 }
 
 enum MessageStatus {
-  QUEUED      // na fila
-  SENDING     // sendo enviado
-  SENT        // enviado ao provider
-  DELIVERED   // entregue ao destinatário
-  READ        // lido
-  FAILED      // falhou em todos os providers
-  SCHEDULED   // agendado para envio futuro
-  CANCELLED   // cancelado
+  QUEUED // na fila
+  SENDING // sendo enviado
+  SENT // enviado ao provider
+  DELIVERED // entregue ao destinatário
+  READ // lido
+  FAILED // falhou em todos os providers
+  SCHEDULED // agendado para envio futuro
+  CANCELLED // cancelado
 }
 
 enum MessageType {
@@ -402,10 +408,10 @@ enum MessageType {
   AUDIO
   DOCUMENT
   STICKER
-  BUTTONS     // mensagem interativa com botões (só via WuzAPI)
-  LOCATION    // pin de localização (só via WuzAPI)
-  CONTACT     // cartão de contato / vCard (só via WuzAPI)
-  POLL        // enquete com opções de resposta (só via WuzAPI)
+  BUTTONS // mensagem interativa com botões (só via WuzAPI)
+  LOCATION // pin de localização (só via WuzAPI)
+  CONTACT // cartão de contato / vCard (só via WuzAPI)
+  POLL // enquete com opções de resposta (só via WuzAPI)
 }
 
 enum RotationReason {

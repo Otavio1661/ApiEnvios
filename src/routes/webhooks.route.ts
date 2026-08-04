@@ -1,5 +1,6 @@
 // src/routes/webhooks.route.ts
 import type { FastifyInstance } from 'fastify'
+import { timingSafeEqual } from 'crypto'
 import { z } from 'zod'
 import { authManage } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
@@ -8,6 +9,15 @@ import { mapInboundStatus, normalizeProvider, isStatusAdvance } from '../service
 import { dispatchWebhook } from '../services/notification.service'
 import { QR_TTL_SECONDS } from '../services/instance.service'
 import type { MessageStatus } from '../types'
+
+// Compara o `?ws=` recebido contra o segredo esperado em tempo constante.
+// Tamanhos diferentes já reprovam antes de chamar timingSafeEqual (que exige
+// buffers do mesmo tamanho — comparar isso primeiro não reintroduz o timing
+// leak, pois o tamanho do segredo não é informação sensível por si só).
+function webhookSecretMatches(received: unknown, expected: string): boolean {
+  if (typeof received !== 'string' || received.length !== expected.length) return false
+  return timingSafeEqual(Buffer.from(received), Buffer.from(expected))
+}
 
 const webhookSchema = z.object({
   url: z.string().url(),
@@ -79,7 +89,7 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
   // capturado como instanceId.
   // C3: tratamento de status de entrega por número (atualmente só conexão/QR);
   // o casamento de Message ainda é por instância no fluxo legado de envio.
-  app.post<{ Params: { provider: string; numberId: string } }>(
+  app.post<{ Params: { provider: string; numberId: string }; Querystring: { ws?: string } }>(
     '/webhooks/inbound/:provider/number/:numberId',
     async (request, reply) => {
       const { provider: providerParam, numberId } = request.params
@@ -93,7 +103,9 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
       // Resolve o InstanceNumber. 200 (não 404) se inexistente, para o provider
       // não re-tentar em loop por config de webhook órfã.
       // `include: instance` é necessário pro repasse de MESSAGE_RECEIVED (precisa
-      // de instance.apiClientId e instance.id, que não existem no InstanceNumber).
+      // de instance.apiClientId e instance.id, que não existem no InstanceNumber) e
+      // agora também pro segredo do webhook (Instance.webhookSecret — o número não
+      // tem um próprio).
       const number = await prisma.instanceNumber.findUnique({
         where: { id: numberId },
         include: { instance: true },
@@ -101,6 +113,14 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
       if (!number) {
         request.log.warn(`[Inbound] Número inexistente: ${numberId} (provider=${provider})`)
         return reply.status(200).send({ ignored: true, reason: 'number_not_found' })
+      }
+
+      // Autenticação: só quem conhece o segredo (embutido na URL registrada no
+      // provider) chega até aqui. instanceId/numberId sozinhos não bastam mais —
+      // são devolvidos ao próprio tenant nas respostas da API, não são segredo.
+      if (!webhookSecretMatches(request.query.ws, number.instance.webhookSecret)) {
+        request.log.warn(`[Inbound] ws inválido/ausente para número ${numberId} (provider=${provider})`)
+        return reply.status(401).send({ error: 'Não autorizado' })
       }
 
       try {
@@ -157,7 +177,7 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
     },
   )
 
-  app.post<{ Params: { provider: string; instanceId: string } }>(
+  app.post<{ Params: { provider: string; instanceId: string }; Querystring: { ws?: string } }>(
     '/webhooks/inbound/:provider/:instanceId',
     async (request, reply) => {
       const { provider: providerParam, instanceId } = request.params
@@ -176,6 +196,14 @@ export async function inboundWebhooksRoutes(app: FastifyInstance) {
       if (!instance) {
         request.log.warn(`[Inbound] Instância inexistente: ${instanceId} (provider=${provider})`)
         return reply.status(200).send({ ignored: true, reason: 'instance_not_found' })
+      }
+
+      // 2b. Autenticação: instanceId sozinho não é mais suficiente (é devolvido ao
+      // próprio tenant nas respostas da API, não é segredo) — exige o `ws` embutido
+      // na URL registrada no provider.
+      if (!webhookSecretMatches(request.query.ws, instance.webhookSecret)) {
+        request.log.warn(`[Inbound] ws inválido/ausente para instância ${instanceId} (provider=${provider})`)
+        return reply.status(401).send({ error: 'Não autorizado' })
       }
 
       // 3. Processamento resiliente — qualquer erro é logado e respondemos 200.

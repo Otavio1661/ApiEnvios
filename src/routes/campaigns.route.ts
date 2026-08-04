@@ -64,9 +64,7 @@ export async function campaignsRoutes(app: FastifyInstance) {
       const phones = [...new Set(payload.to.map(normalizePhone))]
       const limit = request.apiClient!.maxPerRecipientPerHour
 
-      const results: RecipientResult[] = []
-      const queuedIds: string[] = []
-      for (const to of phones) {
+      const processarDestinatario = async (to: string): Promise<RecipientResult> => {
         // Idempotência opcional por destino.
         const externalId = payload.externalIdPrefix ? `${payload.externalIdPrefix}:${to}` : undefined
         if (externalId) {
@@ -75,16 +73,14 @@ export async function campaignsRoutes(app: FastifyInstance) {
             select: { id: true },
           })
           if (existing) {
-            results.push({ to, status: 'DUPLICATE', id: existing.id })
-            continue
+            return { to, status: 'DUPLICATE', id: existing.id }
           }
         }
 
         // Teto anti-flood por destinatário (mesma janela/contador da rota single).
         const rl = await checkRecipientHourlyLimit(apiClientId, to, limit)
         if (!rl.allowed) {
-          results.push({ to, status: 'RATE_LIMITED', retryAfterSec: rl.retryAfterSec })
-          continue
+          return { to, status: 'RATE_LIMITED', retryAfterSec: rl.retryAfterSec }
         }
 
         const message = await prisma.message.create({
@@ -101,9 +97,20 @@ export async function campaignsRoutes(app: FastifyInstance) {
           },
         })
         await enqueueSend(message.id, message.maxRetries)
-        queuedIds.push(message.id)
-        results.push({ to, status: 'QUEUED', id: message.id })
+        return { to, status: 'QUEUED', id: message.id }
       }
+
+      // Processa em lotes com concorrência limitada — uma campanha grande (até
+      // MAX_RECIPIENTS) não faz mais 1 destinatário por vez em série (até 3
+      // round-trips de DB/Redis cada), e sim CHUNK_SIZE em paralelo por vez.
+      const CHUNK_SIZE = 25
+      const results: RecipientResult[] = []
+      for (let i = 0; i < phones.length; i += CHUNK_SIZE) {
+        const chunk = phones.slice(i, i + CHUNK_SIZE)
+        const chunkResults = await Promise.all(chunk.map(processarDestinatario))
+        results.push(...chunkResults)
+      }
+      const queuedIds = results.filter((r) => r.status === 'QUEUED' && r.id).map((r) => r.id as string)
 
       // Registra o lote (Campaign) só se houve envio — vincula as mensagens criadas.
       let campaignId: string | undefined

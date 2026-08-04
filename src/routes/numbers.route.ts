@@ -15,15 +15,25 @@ const createNumberSchema = z.object({
 })
 
 export async function numbersRoutes(app: FastifyInstance) {
-  // ── GET /numbers — Lista as instâncias do tenant ─────────────
+  // ── GET /numbers — Lista as instâncias do tenant (paginado) ──
   app.get('/numbers', {
     preHandler: authAccount,
     handler: async (request, reply) => {
-      const numbers = await prisma.instance.findMany({
-        where: { apiClientId: request.apiClient!.id },
-        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
-      })
-      return reply.send(numbers)
+      const q = request.query as { page?: string; limit?: string }
+      const page = Math.max(1, Number(q.page ?? 1))
+      const limit = Math.min(100, Math.max(1, Number(q.limit ?? 20)))
+      const where = { apiClientId: request.apiClient!.id }
+
+      const [numbers, total] = await Promise.all([
+        prisma.instance.findMany({
+          where,
+          orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.instance.count({ where }),
+      ])
+      return reply.send({ data: numbers, page, limit, total })
     },
   })
 

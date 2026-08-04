@@ -29,7 +29,7 @@ import {
   refreshQrNumber,
   syncNumberStatus,
   deleteNumber,
-  assertInstanceQuota,
+  createInstanceWithQuota,
 } from '../services/instance.service'
 import { isSuperAdmin, memberScopeId } from '../middlewares/auth.middleware'
 import { slugSchema } from '../utils/slug'
@@ -514,11 +514,8 @@ export async function panelRoutes(app: FastifyInstance) {
     }
 
     try {
-      // Quota por conta (super admin ignora).
-      if (!isSuperAdmin(request)) {
-        await assertInstanceQuota(request.apiClient!.id)
-      }
-      const instance = await createInstance({
+      const criar = isSuperAdmin(request) ? createInstance : createInstanceWithQuota
+      const instance = await criar({
         name: parsed.data.name,
         slug: parsed.data.slug,
         provider: parsed.data.provider,

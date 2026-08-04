@@ -15,6 +15,7 @@ import axios, { AxiosInstance } from 'axios'
 import { randomBytes } from 'crypto'
 import { config } from '../config'
 import { logger } from '../utils/logger'
+import { assertPublicHttpUrl, pinnedAgents } from '../utils/ssrf-guard'
 import type { IWhatsappProvider, ProviderSendResult, InstanceStatus, MessageType, Provider, WhatsappButton, ChatPresenceState, CheckNumberResult } from '../types'
 
 interface WuzUser {
@@ -86,9 +87,17 @@ export class WuzapiProvider implements IWhatsappProvider {
     const start = Date.now()
 
     // WuzAPI recebe a mídia em base64 (data URI), não por URL — baixamos e convertemos.
+    // mediaUrl vem de fora (payload do tenant): valida contra SSRF (bloqueia IP privado/
+    // reservado/metadata da nuvem) e fixa a conexão no IP já validado (evita DNS rebinding
+    // entre a checagem e o fetch).
     let dataUri: string
     try {
-      const media = await axios.get<ArrayBuffer>(mediaUrl, { responseType: 'arraybuffer', timeout: 20000 })
+      const pinned = await assertPublicHttpUrl(mediaUrl)
+      const media = await axios.get<ArrayBuffer>(mediaUrl, {
+        responseType: 'arraybuffer',
+        timeout: 20000,
+        ...pinnedAgents(pinned),
+      })
       const mime = media.headers['content-type'] ?? this.defaultMime(type)
       dataUri = `data:${mime};base64,${Buffer.from(media.data).toString('base64')}`
     } catch (err: any) {

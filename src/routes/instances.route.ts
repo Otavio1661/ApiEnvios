@@ -14,13 +14,12 @@ import { sendBodySchema } from '../schemas/message.schema'
 import { buildMessageCreateFields } from '../utils/message-payload'
 import {
   toInstanceResponse,
-  listInstancesWithConnection,
   deriveConnectionState,
   refreshQr,
   registerInboundWebhook,
   syncInstanceStatus,
   createInstance,
-  assertInstanceQuota,
+  createInstanceWithQuota,
   findInstanceByIdOrSlug,
   updateInstance,
   assignInstanceOwner,
@@ -118,11 +117,8 @@ export async function instancesRoutes(app: FastifyInstance) {
 
 
       try {
-        // Quota por conta (super admin ignora).
-        if (!isSuperAdmin(request)) {
-          await assertInstanceQuota(request.apiClient!.id)
-        }
-        const instance = await createInstance({
+        const criar = isSuperAdmin(request) ? createInstance : createInstanceWithQuota
+        const instance = await criar({
           name: body.data.name,
           slug: body.data.slug,
           provider: body.data.provider,
@@ -207,15 +203,34 @@ export async function instancesRoutes(app: FastifyInstance) {
     },
   })
 
-  // ── GET /instances — Lista instâncias do tenant ───────────────
+  // ── GET /instances — Lista instâncias do tenant (paginado) ────
   app.get('/instances', {
     preHandler: authManage,
     handler: async (request, reply) => {
       // MEMBER vê só as suas; OWNER/admin/API key veem todas as da conta.
       // `connection` = status derivado do pool (fonte de verdade do envio); mantém
       // `connectionState` legado por compatibilidade.
-      const instances = await listInstancesWithConnection(request.apiClient!.id, memberScopeId(request))
-      return reply.send(instances.map((i) => ({ ...toInstanceResponse(i), connection: i.connection })))
+      const q = request.query as { page?: string; limit?: string }
+      const page = Math.max(1, Number(q.page ?? 1))
+      const limit = Math.min(100, Math.max(1, Number(q.limit ?? 20)))
+      const ownerUserId = memberScopeId(request)
+      const where = { apiClientId: request.apiClient!.id, ...(ownerUserId ? { ownerUserId } : {}) }
+
+      const [rows, total] = await Promise.all([
+        prisma.instance.findMany({
+          where,
+          orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+          include: { numbers: { select: { connectionState: true } } },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.instance.count({ where }),
+      ])
+      const data = rows.map(({ numbers, ...inst }) => ({
+        ...toInstanceResponse(inst),
+        connection: deriveConnectionState(numbers),
+      }))
+      return reply.send({ data, page, limit, total })
     },
   })
 
