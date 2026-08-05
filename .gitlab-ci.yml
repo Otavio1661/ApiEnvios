@@ -1,0 +1,43 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "qa"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+stages: [build, test, deploy]
+
+build:
+  stage: build
+  tags: ["apienvios-shell"]
+  script:
+    # --target builder: o estágio final (runtime) já removeu devDependencies/src
+    # (só tem dist/ + deps de produção) — o estágio builder ainda tem tudo que o
+    # vitest precisa.
+    - docker build -f docker/Dockerfile --target builder -t apienvios_ci:$CI_COMMIT_SHORT_SHA .
+
+test:
+  stage: test
+  tags: ["apienvios-shell"]
+  needs: ["build"]
+  variables:
+    DATABASE_URL: "postgresql://ci:ci@127.0.0.1:1/ci_not_real"
+  script:
+    - docker run --rm --user "$(id -u):$(id -g)" -e DATABASE_URL="$DATABASE_URL"
+        apienvios_ci:$CI_COMMIT_SHORT_SHA
+        npm test
+
+deploy:
+  stage: deploy
+  tags: ["apienvios-shell"]
+  needs: ["test"]
+  variables:
+    GIT_STRATEGY: none
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - git -C /home/r4server/prod/apienvios fetch "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/apienvios/apienvios.git" "$CI_COMMIT_SHA"
+    - git -C /home/r4server/prod/apienvios checkout --detach "$CI_COMMIT_SHA"
+    - cd /home/r4server/prod/apienvios
+    - docker compose build app
+    - docker compose up -d --no-deps app
