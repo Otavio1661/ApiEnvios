@@ -7,7 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../utils/prisma'
 import { config } from '../config'
-import { verifyPassword } from '../utils/password'
+import { verifyPassword, verifyPasswordDummy } from '../utils/password'
 import { normalizePhone } from '../utils/helpers'
 import { enqueueSend, requeueSend, removeSendJob } from '../queues/send-message.queue'
 import {
@@ -343,9 +343,11 @@ export async function panelRoutes(app: FastifyInstance) {
       include: { apiClient: true },
     })
 
+    // Dummy compare no branch "não existe" — mesmo custo de bcrypt do branch
+    // real, fecha o timing side-channel de enumeração de e-mail.
     const ok = user && user.apiClient.active
       ? await verifyPassword(parsed.data.password, user.passwordHash)
-      : false
+      : await verifyPasswordDummy(parsed.data.password).then(() => false)
 
     if (!user || !ok) {
       await registrarTentativaFalha(request.ip, parsed.data.email, dispositivoId)

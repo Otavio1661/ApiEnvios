@@ -1,7 +1,6 @@
 // src/server.ts
 import 'dotenv/config'
 import Fastify, { type FastifyInstance } from 'fastify'
-import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import jwt from '@fastify/jwt'
@@ -58,7 +57,11 @@ export function buildApp(): FastifyInstance {
   })
 
   // ── Plugins ───────────────────────────────────────────────────
-  app.register(cors, { origin: true })
+  // CORS removido de propósito: o painel /admin é renderizado pelo próprio
+  // Fastify (mesma origem) e os consumidores reais da API (Agenda Fácil,
+  // Acaiboot) chamam servidor-a-servidor — nunca existiu chamada de
+  // navegador cross-origin legítima. `origin: true` só refletia qualquer
+  // Origin sem necessidade real.
   // helmet: desativa CSP para o painel (Alpine via CDN + estilos inline do Eta).
   // A API REST não é afetada (continua respondendo JSON).
   app.register(helmet, { contentSecurityPolicy: false })

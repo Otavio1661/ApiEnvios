@@ -13,3 +13,15 @@ export async function hashPassword(plain: string): Promise<string> {
 export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
   return bcrypt.compare(plain, hash)
 }
+
+// Hash fixo (não corresponde a nenhuma senha real) — usado só pra pagar o
+// mesmo custo de bcrypt quando o usuário não existe/está inativo, fechando
+// o timing side-channel que permitia descobrir e-mails cadastrados medindo
+// o tempo de resposta do login (~150-200ms de diferença, confirmado em teste).
+const DUMMY_HASH = bcrypt.hashSync('dummy-timing-fix', SALT_ROUNDS)
+
+/** Gasta o mesmo tempo de um bcrypt.compare real, sem revelar nada — chamar
+ * no branch de "usuário não encontrado" dos logins, descartando o resultado. */
+export async function verifyPasswordDummy(plain: string): Promise<void> {
+  await bcrypt.compare(plain, DUMMY_HASH)
+}

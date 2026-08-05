@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { authJwt } from '../middlewares/auth.middleware'
 import { prisma } from '../utils/prisma'
-import { hashPassword, verifyPassword } from '../utils/password'
+import { hashPassword, verifyPassword, verifyPasswordDummy } from '../utils/password'
 import {
   getOrSetDeviceId,
   verificarBloqueio,
@@ -52,8 +52,11 @@ export async function authRoutes(app: FastifyInstance) {
       include: { apiClient: true },
     })
 
-    // Mensagem genérica (não revela se o e-mail existe).
+    // Mensagem genérica (não revela se o e-mail existe) — o dummy compare
+    // abaixo garante que este branch gasta o mesmo tempo do branch de senha
+    // errada, fechando o timing side-channel de enumeração de e-mail.
     if (!user || !user.apiClient.active) {
+      await verifyPasswordDummy(body.data.password)
       await registrarTentativaFalha(request.ip, body.data.email, dispositivoId)
       return reply.status(401).send({ error: 'Credenciais inválidas' })
     }
