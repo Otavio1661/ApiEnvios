@@ -21,12 +21,19 @@ test:
   needs: ["build"]
   variables:
     DATABASE_URL: "postgresql://ci:ci@127.0.0.1:1/ci_not_real"
+    # O vitest define NODE_ENV=test, então isDev vira false e o guard de
+    # produção do src/config/index.ts rejeita os segredos default de dev.
+    # Valores de CI descartáveis (não são os de produção, que continuam só
+    # no .env do servidor) só pra passar por esse guard.
+    JWT_SECRET: "ci-jwt-nao-usado-em-lugar-nenhum"
+    API_SECRET: "ci-api-nao-usado-em-lugar-nenhum"
   script:
     # Sem --user de propósito: este job não monta nada do host (roda tudo dentro
     # da imagem), então não há risco de deixar arquivo root-owned no diretório do
     # runner — e com --user o vitest não consegue escrever seu cache em
     # /app/node_modules/.vite, que pertence ao root da própria imagem.
     - docker run --rm -e DATABASE_URL="$DATABASE_URL"
+        -e JWT_SECRET="$JWT_SECRET" -e API_SECRET="$API_SECRET"
         apienvios_ci:$CI_COMMIT_SHORT_SHA
         npm test
 
