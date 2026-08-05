@@ -20,7 +20,6 @@ deploy:
     GIT_STRATEGY: none
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
   script:
     - git -C /home/r4server/prod/apienvios fetch "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/apienvios/apienvios.git" "$CI_COMMIT_SHA"
     - git -C /home/r4server/prod/apienvios checkout --detach "$CI_COMMIT_SHA"
