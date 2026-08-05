@@ -177,3 +177,5 @@ Valide recomputando o HMAC com o seu segredo sobre `${timestamp}.${rawBody}`.
 npm test          # vitest (unit + integração)
 npx tsc --noEmit  # type-check
 ```
+
+<!-- teste de pipeline CI -->
