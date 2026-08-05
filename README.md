@@ -178,4 +178,3 @@ npm test          # vitest (unit + integração)
 npx tsc --noEmit  # type-check
 ```
 
-<!-- teste de pipeline CI -->
