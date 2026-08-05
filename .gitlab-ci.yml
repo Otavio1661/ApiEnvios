@@ -22,7 +22,11 @@ test:
   variables:
     DATABASE_URL: "postgresql://ci:ci@127.0.0.1:1/ci_not_real"
   script:
-    - docker run --rm --user "$(id -u):$(id -g)" -e DATABASE_URL="$DATABASE_URL"
+    # Sem --user de propósito: este job não monta nada do host (roda tudo dentro
+    # da imagem), então não há risco de deixar arquivo root-owned no diretório do
+    # runner — e com --user o vitest não consegue escrever seu cache em
+    # /app/node_modules/.vite, que pertence ao root da própria imagem.
+    - docker run --rm -e DATABASE_URL="$DATABASE_URL"
         apienvios_ci:$CI_COMMIT_SHORT_SHA
         npm test
 
