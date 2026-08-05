@@ -1,5 +1,11 @@
 version: "3.9"
 
+# Nome do projeto fixo — evita depender do nome da pasta onde o repo está
+# clonado. Já é "apienvios" hoje (nome real dos volumes já confirmado como
+# apienvios_postgres_data etc.), então isso só torna explícito o que já era
+# implícito, sem risco pros dados ao dividir em prod/dev.
+name: ${PROJECT_NAME:-apienvios}
+
 # Rede isolada para não interferir com o projeto casamento (casamento_default / r4net)
 networks:
   apienvios_net:
@@ -9,7 +15,7 @@ services:
   # ── Banco de dados dedicado ─────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: apienvios_postgres
+    container_name: ${CONTAINER_PREFIX:-apienvios}_postgres
     restart: unless-stopped
     networks:
       - apienvios_net
@@ -18,7 +24,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: apienvios
     ports:
-      - "5433:5432"   # 5432 ocupado pelo r4server (casamento)
+      - "${PG_PORT:-5433}:5432"   # 5432 ocupado pelo r4server (casamento)
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -30,12 +36,12 @@ services:
   # ── Cache e filas ───────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: apienvios_redis
+    container_name: ${CONTAINER_PREFIX:-apienvios}_redis
     restart: unless-stopped
     networks:
       - apienvios_net
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -47,14 +53,14 @@ services:
   # ── Provider 1: Evolution API ───────────────────────────────
   evolution_api:
     image: evoapicloud/evolution-api:latest
-    container_name: apienvios_evolution
+    container_name: ${CONTAINER_PREFIX:-apienvios}_evolution
     restart: unless-stopped
     networks:
       - apienvios_net
     ports:
-      - "8081:8080"
+      - "${EVOLUTION_PORT:-8081}:8080"
     environment:
-      SERVER_URL: http://localhost:8081
+      SERVER_URL: ${EVOLUTION_PUBLIC_URL:-http://localhost:8081}
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
       DATABASE_ENABLED: "true"
@@ -77,12 +83,12 @@ services:
   # ── Provider 2: WuzAPI (Go/whatsmeow, botões interativos) ───
   wuzapi:
     image: asternic/wuzapi:latest
-    container_name: apienvios_wuzapi
+    container_name: ${CONTAINER_PREFIX:-apienvios}_wuzapi
     restart: unless-stopped
     networks:
       - apienvios_net
     ports:
-      - "8082:8080"
+      - "${WUZAPI_PORT:-8082}:8080"
     environment:
       WUZAPI_ADMIN_TOKEN: ${WUZAPI_ADMIN_TOKEN}
       # Chaves fixas: sem elas o WuzAPI gera aleatórias no boot e PERDE todos os
@@ -98,12 +104,12 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: apienvios_app
+    container_name: ${CONTAINER_PREFIX:-apienvios}_app
     restart: unless-stopped
     networks:
       - apienvios_net
     ports:
-      - "3002:3002"
+      - "${APP_PORT:-3002}:3002"
     # Segredos vêm do .env local (gitignored) via ${VAR} — nada de valor real
     # fica hardcoded no arquivo versionado. docker-compose lê o .env desta
     # mesma pasta automaticamente pra resolver essas substituições.
@@ -111,7 +117,7 @@ services:
       NODE_ENV: production
       PORT: 3002
       PUBLIC_BASE_URL: http://app:3002
-      PUBLIC_API_URL: https://dev-api.r4dev.com.br
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://dev-api.r4dev.com.br}
       API_SECRET: ${API_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
