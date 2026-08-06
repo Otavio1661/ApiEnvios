@@ -1,22 +1,211 @@
-<div class="login-wrap">
-  <div class="card login-card">
-    <h1 class="login-title">ApiEnvios</h1>
-    <p class="muted">Painel de gerenciamento de instâncias</p>
+<style>
+  /* ── Login com a identidade R4dev — paleta/fontes copiadas do site
+     institucional (r4dev.com.br) de propósito, pra bater exatamente.
+     Escopado em .r4-login (não mexe no resto do painel, que é claro/
+     corporativo por design — só o login ganha a cara da marca). ── */
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@400;600;700;800&display=swap');
+
+  .r4-login {
+    --r4-bg: #050912;
+    --r4-bg-2: #0a1020;
+    --r4-bg-3: #100a24;
+    --r4-text: #f2f4fb;
+    --r4-muted: rgba(242, 244, 251, 0.64);
+    --r4-muted-2: rgba(242, 244, 251, 0.42);
+    --r4-accent: #7c5cff;
+    --r4-accent-2: #3d7bff;
+    --r4-accent-3: #22d3ee;
+    --r4-grad: linear-gradient(135deg, #7c5cff 0%, #3d7bff 100%);
+    --r4-border: rgba(255, 255, 255, 0.10);
+    --r4-glow: rgba(124, 92, 255, 0.45);
+
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    overflow: hidden;
+    background: linear-gradient(160deg, var(--r4-bg) 0%, var(--r4-bg-2) 45%, var(--r4-bg-3) 100%);
+    font-family: 'Manrope', system-ui, sans-serif;
+    z-index: 1000;
+  }
+
+  /* Logo grande centralizada atrás do card — é o que faz o
+     backdrop-filter do card valer a pena: o card fica no meio, borrado,
+     e a raposa aparece suavizada por trás dele. */
+  .r4-login::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(105vh, 900px);
+    height: max(105vh, 900px);
+    transform: translate(-50%, -50%);
+    background: url('/admin/assets/img/r4dev-fox.png') center / contain no-repeat;
+    opacity: 0.5;
+    filter: saturate(1.15);
+    pointer-events: none;
+  }
+
+  /* Glows de ambiente — mesmo truque do site institucional (blobs
+     radiais desfocados), dá profundidade sem virar ruído visual. */
+  .r4-glow {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    pointer-events: none;
+  }
+  .r4-glow--1 { width: 480px; height: 480px; left: -140px; top: -120px; background: var(--r4-accent); opacity: 0.30; }
+  .r4-glow--2 { width: 420px; height: 420px; right: 8%; bottom: -160px; background: var(--r4-accent-2); opacity: 0.26; }
+  .r4-glow--3 { width: 320px; height: 320px; right: 22%; top: 8%; background: var(--r4-accent-3); opacity: 0.16; }
+
+  .r4-card {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 400px;
+    padding: 44px 36px 36px;
+    border-radius: 28px;
+    background: rgba(16, 14, 34, 0.55);
+    border: 1px solid var(--r4-border);
+    backdrop-filter: blur(22px) saturate(1.3);
+    -webkit-backdrop-filter: blur(22px) saturate(1.3);
+    box-shadow:
+      0 30px 80px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+      0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  }
+
+  .r4-brand-mark {
+    width: 44px;
+    height: 44px;
+    margin: 0 0 20px;
+    background: url('/admin/assets/img/r4dev-fox.png') center / cover no-repeat;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px var(--r4-glow);
+  }
+
+  .r4-title {
+    margin: 0;
+    font-family: 'Sora', 'Manrope', system-ui, sans-serif;
+    font-weight: 800;
+    font-size: 30px;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+    color: var(--r4-text);
+  }
+
+  .r4-subtitle {
+    margin: 8px 0 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Sora', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    background: var(--r4-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .r4-tagline {
+    margin: 14px 0 28px;
+    font-size: 14px;
+    color: var(--r4-muted);
+  }
+
+  .r4-alert {
+    margin: 0 0 18px;
+    padding: 11px 14px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    color: #ffd7d7;
+    background: rgba(220, 38, 38, 0.16);
+    border: 1px solid rgba(220, 38, 38, 0.35);
+  }
+
+  .r4-field { display: block; margin-bottom: 16px; }
+  .r4-field span {
+    display: block;
+    margin-bottom: 7px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--r4-muted);
+  }
+  .r4-field input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--r4-border);
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--r4-text);
+    font-family: 'Manrope', sans-serif;
+    font-size: 14.5px;
+    outline: none;
+    transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  }
+  .r4-field input::placeholder { color: var(--r4-muted-2); }
+  .r4-field input:focus {
+    border-color: var(--r4-accent);
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25);
+  }
+
+  .r4-btn {
+    width: 100%;
+    margin-top: 6px;
+    padding: 13px 16px;
+    border: none;
+    border-radius: 12px;
+    background: var(--r4-grad);
+    color: #fff;
+    font-family: 'Sora', sans-serif;
+    font-weight: 700;
+    font-size: 14.5px;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    box-shadow: 0 12px 30px var(--r4-glow);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  }
+  .r4-btn:hover { transform: translateY(-1px); box-shadow: 0 16px 38px var(--r4-glow); filter: brightness(1.06); }
+  .r4-btn:active { transform: translateY(0); }
+
+  @media (max-width: 480px) {
+    .r4-login::before { opacity: 0.35; }
+    .r4-card { padding: 34px 24px 28px; }
+    .r4-title { font-size: 26px; }
+  }
+</style>
+
+<div class="r4-login">
+  <div class="r4-glow r4-glow--1"></div>
+  <div class="r4-glow r4-glow--2"></div>
+  <div class="r4-glow r4-glow--3"></div>
+
+  <div class="r4-card">
+    <div class="r4-brand-mark"></div>
+    <h1 class="r4-title">ApiEnvios</h1>
+    <span class="r4-subtitle">R4dev</span>
+    <p class="r4-tagline">Painel de gerenciamento de instâncias</p>
 
     <% if (it.error) { %>
-      <div class="alert alert-error"><%= it.error %></div>
+      <div class="r4-alert"><%= it.error %></div>
     <% } %>
 
-    <form method="POST" action="/admin/login" class="form">
-      <label class="field">
+    <form method="POST" action="/admin/login">
+      <label class="r4-field">
         <span>E-mail</span>
-        <input type="email" name="email" required autofocus value="<%= it.email || '' %>" />
+        <input type="email" name="email" required autofocus value="<%= it.email || '' %>" placeholder="voce@exemplo.com" />
       </label>
-      <label class="field">
+      <label class="r4-field">
         <span>Senha</span>
-        <input type="password" name="password" required />
+        <input type="password" name="password" required placeholder="••••••••" />
       </label>
-      <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+      <button type="submit" class="r4-btn">Entrar</button>
     </form>
   </div>
 </div>
