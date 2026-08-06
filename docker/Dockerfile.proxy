@@ -1,0 +1,5 @@
+FROM nginx:alpine
+COPY docker/proxy-default.conf /etc/nginx/conf.d/default.conf
+COPY docker/proxy-entrypoint.sh /proxy-entrypoint.sh
+RUN chmod +x /proxy-entrypoint.sh
+ENTRYPOINT ["/proxy-entrypoint.sh"]
