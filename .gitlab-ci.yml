@@ -24,5 +24,8 @@ deploy:
     - git -C /home/r4server/prod/apienvios fetch "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/apienvios/apienvios.git" "$CI_COMMIT_SHA"
     - git -C /home/r4server/prod/apienvios checkout --detach "$CI_COMMIT_SHA"
     - cd /home/r4server/prod/apienvios
-    - docker compose build app
-    - docker compose up -d --no-deps app
+    # Blue/green: builda a imagem nova, sobe só no slot inativo, espera
+    # saudável (/health) e só então troca o proxy (reload gracioso). Zero
+    # downtime confirmado em teste real (ver docker/deploy-bluegreen.sh) —
+    # mesma receita já validada no Alvará.
+    - bash docker/deploy-bluegreen.sh
