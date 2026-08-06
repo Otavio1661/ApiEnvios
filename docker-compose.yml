@@ -99,12 +99,15 @@ services:
     volumes:
       - wuzapi_data:/app/dbdata
 
-  # ── Aplicação principal ──────────────────────────────────────
+  # ── Aplicação — SÓ EM DEV (container único, sem proxy) ────────────────────
+  # Produção usa os slots app_blue/app_green + proxy mais abaixo — ver
+  # COMPOSE_PROFILES no .env de cada pasta.
   app:
     build:
       context: .
       dockerfile: docker/Dockerfile
     container_name: ${CONTAINER_PREFIX:-apienvios}_app
+    profiles: ["dev"]
     restart: unless-stopped
     networks:
       - apienvios_net
@@ -113,7 +116,7 @@ services:
     # Segredos vêm do .env local (gitignored) via ${VAR} — nada de valor real
     # fica hardcoded no arquivo versionado. docker-compose lê o .env desta
     # mesma pasta automaticamente pra resolver essas substituições.
-    environment:
+    environment: &app_environment
       NODE_ENV: production
       PORT: 3002
       PUBLIC_BASE_URL: http://app:3002
@@ -147,7 +150,78 @@ services:
       redis:
         condition: service_healthy
 
+  # ── Proxy reverso (blue/green) — SÓ EM PRODUÇÃO ────────────────────────────
+  # Fica no ar o tempo todo com o mesmo container; deploy troca só o arquivo
+  # de upstream + `nginx -s reload` (gracioso, não derruba conexão nenhuma).
+  proxy:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.proxy
+    image: ${CONTAINER_PREFIX:-apienvios}_proxy:latest
+    container_name: ${CONTAINER_PREFIX:-apienvios}_proxy
+    profiles: ["bluegreen"]
+    restart: unless-stopped
+    networks:
+      apienvios_net:
+        # "app" mantido por compatibilidade: instâncias já registradas nos
+        # providers (Evolution/WuzAPI) guardam a URL de webhook como
+        # http://app:3002/... (PUBLIC_BASE_URL, ver services/instance.service.ts)
+        # — sem esse alias, essas instâncias antigas parariam de receber
+        # mensagens inbound depois da virada pro blue/green.
+        aliases:
+          - app
+    ports:
+      - "${APP_PORT:-3002}:3002"
+    volumes:
+      - apienvios_proxy_state:/etc/nginx/active
+      # Bind-mount do DIRETÓRIO (não do arquivo proxy.conf sozinho — bind-mount
+      # de arquivo único fica desatualizado quando o arquivo é substituído
+      # por rename atômico, ex. `git checkout`; o mount trava no inode
+      # antigo. Diretório não tem esse problema).
+      - ./docker:/etc/nginx/host-docker:ro
+    depends_on:
+      - app_blue
+      - app_green
+
+  # ── Slots blue/green ────────────────────────────────────────────────────
+  # Nenhum dos dois publica porta pro host — só o proxy é alcançável de fora
+  # (e dos outros containers do compose, via o alias "app").
+  app_blue:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ${IMAGE_TAG:-apienvios}:latest
+    container_name: ${CONTAINER_PREFIX:-apienvios}_app_blue
+    profiles: ["bluegreen"]
+    restart: unless-stopped
+    networks:
+      - apienvios_net
+    environment: *app_environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  app_green:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ${IMAGE_TAG:-apienvios}:latest
+    container_name: ${CONTAINER_PREFIX:-apienvios}_app_green
+    profiles: ["bluegreen"]
+    restart: unless-stopped
+    networks:
+      - apienvios_net
+    environment: *app_environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
   wuzapi_data:
+  apienvios_proxy_state:
