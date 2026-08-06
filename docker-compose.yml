@@ -10,29 +10,16 @@ name: ${PROJECT_NAME:-apienvios}
 networks:
   apienvios_net:
     driver: bridge
+  # Postgres deixou de ser um container por projeto — agora é uma instância
+  # compartilhada com o Alvará (schemas em vez de bancos separados, ver
+  # /home/r4server/{prod,dev}/shared-db/). Rede criada uma vez, fora de
+  # qualquer compose (`docker network create r4server_prod_net` /
+  # `r4server_dev_net`).
+  r4server_db_net:
+    name: ${DB_SHARED_NET:-r4server_prod_net}
+    external: true
 
 services:
-  # ── Banco de dados dedicado ─────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    container_name: ${CONTAINER_PREFIX:-apienvios}_postgres
-    restart: unless-stopped
-    networks:
-      - apienvios_net
-    environment:
-      POSTGRES_USER: apienvios
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: apienvios
-    ports:
-      - "${PG_PORT:-5433}:5432"   # 5432 ocupado pelo r4server (casamento)
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U apienvios"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ── Cache e filas ───────────────────────────────────────────
   redis:
     image: redis:7-alpine
@@ -57,6 +44,7 @@ services:
     restart: unless-stopped
     networks:
       - apienvios_net
+      - r4server_db_net
     ports:
       - "${EVOLUTION_PORT:-8081}:8080"
     environment:
@@ -65,7 +53,14 @@ services:
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://apienvios:${POSTGRES_PASSWORD}@postgres:5432/evolution
+      # ?schema=public explícito: o usuário apienvios tem search_path
+      # default = schema "apienvios" (pro banco "apps", onde esse schema
+      # existe) — mas o banco "evolution" só tem o schema "public" mesmo
+      # (Evolution API é código de terceiro, não entrou no esquema de
+      # schema por projeto, ver plano). Sem isso, a Evolution não encontra
+      # as próprias tabelas (search_path do usuário cai em "apienvios",
+      # que não existe neste banco).
+      DATABASE_CONNECTION_URI: postgresql://apienvios:${POSTGRES_PASSWORD}@${DB_SHARED_HOST:-r4server_prod}:5432/evolution?schema=public
       DATABASE_CONNECTION_CLIENT_NAME: evolution_api
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://redis:6379/1
@@ -75,8 +70,6 @@ services:
       LOG_LEVEL: ERROR
       CONFIG_SESSION_PHONE_VERSION: "2.3000.1035194821"
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -111,6 +104,7 @@ services:
     restart: unless-stopped
     networks:
       - apienvios_net
+      - r4server_db_net
     ports:
       - "${APP_PORT:-3002}:3002"
     # Segredos vêm do .env local (gitignored) via ${VAR} — nada de valor real
@@ -124,8 +118,9 @@ services:
       API_SECRET: ${API_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
-      # Endereços internos Docker (sobrepõem o .env)
-      DATABASE_URL: postgresql://apienvios:${POSTGRES_PASSWORD}@postgres:5432/apienvios
+      # Postgres compartilhado (ver r4server_db_net acima) — banco "apps",
+      # schema "apienvios" (Prisma lê o schema direto da query string).
+      DATABASE_URL: postgresql://apienvios:${POSTGRES_PASSWORD}@${DB_SHARED_HOST:-r4server_prod}:5432/apps?schema=apienvios
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
@@ -145,8 +140,6 @@ services:
       ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD}
       ADMIN_SEED_NAME: ${ADMIN_SEED_NAME}
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -196,10 +189,9 @@ services:
     restart: unless-stopped
     networks:
       - apienvios_net
+      - r4server_db_net
     environment: *app_environment
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -213,15 +205,13 @@ services:
     restart: unless-stopped
     networks:
       - apienvios_net
+      - r4server_db_net
     environment: *app_environment
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
 volumes:
-  postgres_data:
   redis_data:
   wuzapi_data:
   apienvios_proxy_state:
